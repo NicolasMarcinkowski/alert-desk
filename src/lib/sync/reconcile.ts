@@ -72,7 +72,7 @@ export async function reconcilePositions(
   const warnings: string[] = [];
 
   const latestSnapshot = await prisma.positionSnapshot.findFirst({
-    where: { ibkrAccountId: accountDbId },
+    where: { brokerAccountId: accountDbId },
     orderBy: { date: "desc" },
     select: { date: true },
   });
@@ -82,7 +82,7 @@ export async function reconcilePositions(
   const working = new Map<string, WorkingPosition>();
   if (snapshotDate) {
     const snapshots = await prisma.positionSnapshot.findMany({
-      where: { ibkrAccountId: accountDbId, date: snapshotDate },
+      where: { brokerAccountId: accountDbId, date: snapshotDate },
     });
     for (const s of snapshots) {
       working.set(s.instrumentId, {
@@ -99,18 +99,18 @@ export async function reconcilePositions(
   // 2. Contrôle de dérive : snapshot précédent + fills intermédiaires
   if (snapshotDate) {
     const prevSnapshot = await prisma.positionSnapshot.findFirst({
-      where: { ibkrAccountId: accountDbId, date: { lt: snapshotDate } },
+      where: { brokerAccountId: accountDbId, date: { lt: snapshotDate } },
       orderBy: { date: "desc" },
       select: { date: true },
     });
     if (prevSnapshot) {
       const prevRows = await prisma.positionSnapshot.findMany({
-        where: { ibkrAccountId: accountDbId, date: prevSnapshot.date },
+        where: { brokerAccountId: accountDbId, date: prevSnapshot.date },
         select: { instrumentId: true, quantity: true },
       });
       const fills = await prisma.execution.findMany({
         where: {
-          ibkrAccountId: accountDbId,
+          brokerAccountId: accountDbId,
           tradeDate: { gt: prevSnapshot.date, lte: snapshotDate },
         },
         select: { instrumentId: true, side: true, quantity: true },
@@ -148,7 +148,7 @@ export async function reconcilePositions(
   // 3. Fills intraday (postérieurs au snapshot) par-dessus la base
   const intradayFills = await prisma.execution.findMany({
     where: {
-      ibkrAccountId: accountDbId,
+      brokerAccountId: accountDbId,
       ...(snapshotDate ? { tradeDate: { gt: snapshotDate } } : {}),
     },
     orderBy: { tradeTime: "asc" },
@@ -186,13 +186,13 @@ export async function reconcilePositions(
     });
     await prisma.position.upsert({
       where: {
-        ibkrAccountId_instrumentId: {
-          ibkrAccountId: accountDbId,
+        brokerAccountId_instrumentId: {
+          brokerAccountId: accountDbId,
           instrumentId: pos.instrumentId,
         },
       },
       create: {
-        ibkrAccountId: accountDbId,
+        brokerAccountId: accountDbId,
         instrumentId: pos.instrumentId,
         quantity: pos.quantity,
         avgCost: pos.avgCost,
@@ -217,7 +217,7 @@ export async function reconcilePositions(
   // Positions clôturées : disparues du snapshot et sans résidu intraday
   await prisma.position.deleteMany({
     where: {
-      ibkrAccountId: accountDbId,
+      brokerAccountId: accountDbId,
       instrumentId: { notIn: keptInstrumentIds },
     },
   });

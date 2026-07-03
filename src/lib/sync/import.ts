@@ -134,7 +134,7 @@ async function importTrades(
 
     const existing = await prisma.execution.findUnique({
       where: {
-        ibkrAccountId_dedupeKey: { ibkrAccountId: accountDbId, dedupeKey },
+        brokerAccountId_dedupeKey: { brokerAccountId: accountDbId, dedupeKey },
       },
       select: { id: true, source: true },
     });
@@ -142,7 +142,7 @@ async function importTrades(
     if (!existing) {
       await prisma.execution.create({
         data: {
-          ibkrAccountId: accountDbId,
+          brokerAccountId: accountDbId,
           instrumentId,
           dedupeKey,
           ibExecId: t.ibExecId,
@@ -217,14 +217,14 @@ export async function importStatement(
     const instrumentId = await ensureInstrument(instrumentCache, p.instrument);
     await prisma.positionSnapshot.upsert({
       where: {
-        ibkrAccountId_date_instrumentId: {
-          ibkrAccountId: accountDbId,
+        brokerAccountId_date_instrumentId: {
+          brokerAccountId: accountDbId,
           date: new Date(`${date}T00:00:00Z`),
           instrumentId,
         },
       },
       create: {
-        ibkrAccountId: accountDbId,
+        brokerAccountId: accountDbId,
         instrumentId,
         date: new Date(`${date}T00:00:00Z`),
         quantity: p.quantity,
@@ -254,7 +254,7 @@ export async function importStatement(
 
   // Snapshots de NAV — depositsWithdrawals (période) affecté au toDate,
   // approximation documentée : la granularité fine viendra des CashTransactions
-  const account = await prisma.ibkrAccount.findUniqueOrThrow({
+  const account = await prisma.brokerAccount.findUniqueOrThrow({
     where: { id: accountDbId },
     select: { baseCurrency: true },
   });
@@ -262,13 +262,13 @@ export async function importStatement(
     const isPeriodEnd = e.reportDate === statement.toDate;
     await prisma.accountSnapshot.upsert({
       where: {
-        ibkrAccountId_date: {
-          ibkrAccountId: accountDbId,
+        brokerAccountId_date: {
+          brokerAccountId: accountDbId,
           date: new Date(`${e.reportDate}T00:00:00Z`),
         },
       },
       create: {
-        ibkrAccountId: accountDbId,
+        brokerAccountId: accountDbId,
         date: new Date(`${e.reportDate}T00:00:00Z`),
         nav: e.nav,
         cash: e.cash,
@@ -297,14 +297,14 @@ export async function importStatement(
     if (!date) continue;
     await prisma.cashBalance.upsert({
       where: {
-        ibkrAccountId_date_currency: {
-          ibkrAccountId: accountDbId,
+        brokerAccountId_date_currency: {
+          brokerAccountId: accountDbId,
           date: new Date(`${date}T00:00:00Z`),
           currency: c.currency,
         },
       },
       create: {
-        ibkrAccountId: accountDbId,
+        brokerAccountId: accountDbId,
         date: new Date(`${date}T00:00:00Z`),
         currency: c.currency,
         amount: c.amount,
@@ -320,13 +320,13 @@ export async function importStatement(
       : undefined;
     await prisma.cashTransaction.upsert({
       where: {
-        ibkrAccountId_transactionId: {
-          ibkrAccountId: accountDbId,
+        brokerAccountId_transactionId: {
+          brokerAccountId: accountDbId,
           transactionId: ct.transactionId,
         },
       },
       create: {
-        ibkrAccountId: accountDbId,
+        brokerAccountId: accountDbId,
         instrumentId,
         type: mapCashTransactionType(ct.rawType),
         amount: ct.amount,
@@ -346,13 +346,13 @@ export async function importStatement(
       : undefined;
     await prisma.corporateAction.upsert({
       where: {
-        ibkrAccountId_transactionId: {
-          ibkrAccountId: accountDbId,
+        brokerAccountId_transactionId: {
+          brokerAccountId: accountDbId,
           transactionId: ca.transactionId,
         },
       },
       create: {
-        ibkrAccountId: accountDbId,
+        brokerAccountId: accountDbId,
         instrumentId,
         ibkrType: ca.rawType,
         description: ca.description,

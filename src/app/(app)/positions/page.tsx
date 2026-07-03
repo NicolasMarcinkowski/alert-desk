@@ -7,6 +7,7 @@ import {
   type LivePositionGroupData,
 } from "@/components/positions/LivePositionsTable";
 import { daysToExpiry, formatOptionName } from "@/lib/utils/format";
+import { AddOrderButton } from "@/components/orders/AddOrderButton";
 
 export const dynamic = "force-dynamic";
 
@@ -35,10 +36,13 @@ export default async function PositionsPage() {
 
   return (
     <div>
-      <PageTitle
-        title="Positions"
-        subtitle="Import automatique IBKR Flex — cours live (Finnhub) ou différés, badge de fraîcheur par ligne"
-      />
+      <div className="flex items-start justify-between gap-3">
+        <PageTitle
+          title="Positions"
+          subtitle="Saisie manuelle ou import IBKR — cours live ou différés, badge de fraîcheur par ligne"
+        />
+        <AddOrderButton />
+      </div>
 
       {hasDrift && (
         <p className="mb-4 rounded-lg border border-warn/40 bg-warn/10 px-4 py-2.5 text-sm text-warn">
@@ -51,8 +55,8 @@ export default async function PositionsPage() {
       {data.length === 0 ? (
         <Card>
           <p className="py-10 text-center text-sm text-ink-mute">
-            Aucune position ouverte importée. Relie un compte IBKR dans les
-            réglages puis lance une sync.
+            Aucune position ouverte. Ajoute ton premier ordre avec le bouton
+            ci-dessus, ou relie un compte IBKR dans les réglages.
           </p>
         </Card>
       ) : (

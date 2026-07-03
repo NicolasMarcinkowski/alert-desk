@@ -7,7 +7,7 @@ import {
 } from "@/lib/api/validation";
 
 async function ownedAccount(userId: string, id: string) {
-  return prisma.ibkrAccount.findFirst({ where: { id, userId } });
+  return prisma.brokerAccount.findFirst({ where: { id, userId } });
 }
 
 export async function PATCH(
@@ -36,7 +36,7 @@ export async function PATCH(
     data.status = body.status;
   }
 
-  await prisma.ibkrAccount.update({ where: { id }, data });
+  await prisma.brokerAccount.update({ where: { id }, data });
 
   // Mise à jour des query IDs (remplacement par type)
   for (const [key, type] of [
@@ -46,11 +46,11 @@ export async function PATCH(
     const value = body[key];
     if (typeof value !== "string") continue;
     await prisma.flexQuery.deleteMany({
-      where: { ibkrAccountId: id, type },
+      where: { brokerAccountId: id, type },
     });
     if (value.trim()) {
       await prisma.flexQuery.create({
-        data: { ibkrAccountId: id, queryId: value.trim(), type },
+        data: { brokerAccountId: id, queryId: value.trim(), type },
       });
     }
   }
@@ -69,6 +69,6 @@ export async function DELETE(
   const account = await ownedAccount(session.user.id, id);
   if (!account) return unauthorized();
 
-  await prisma.ibkrAccount.delete({ where: { id } });
+  await prisma.brokerAccount.delete({ where: { id } });
   return Response.json({ ok: true });
 }

@@ -13,8 +13,8 @@ type HeaderUser = {
 };
 
 export async function Header({ user }: { user: HeaderUser }) {
-  const [accountCount, lastSuccess, stats] = await Promise.all([
-    prisma.ibkrAccount.count({ where: { userId: user.id } }),
+  const [linkedAccountCount, lastSuccess, stats] = await Promise.all([
+    prisma.brokerAccount.count({ where: { userId: user.id, broker: "IBKR" } }),
     prisma.syncRun.findFirst({
       where: { status: "SUCCESS", account: { userId: user.id } },
       orderBy: { finishedAt: "desc" },
@@ -51,7 +51,7 @@ export async function Header({ user }: { user: HeaderUser }) {
           currency={stats.baseCurrency}
         />
 
-        <SyncButton disabled={accountCount === 0} />
+        <SyncButton disabled={linkedAccountCount === 0} />
 
         <div className="flex items-center gap-2.5 border-l border-edge pl-4">
           {user.image ? (

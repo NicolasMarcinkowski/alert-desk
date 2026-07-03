@@ -8,7 +8,7 @@
 import { prisma } from "@/lib/db/client";
 
 async function userAccountIds(userId: string): Promise<string[]> {
-  const accounts = await prisma.ibkrAccount.findMany({
+  const accounts = await prisma.brokerAccount.findMany({
     where: { userId },
     select: { id: true },
   });
@@ -50,14 +50,14 @@ export async function getPositionGroups(
 ): Promise<PositionGroup[]> {
   const accountIds = await userAccountIds(userId);
   const positions = await prisma.position.findMany({
-    where: { ibkrAccountId: { in: accountIds } },
+    where: { brokerAccountId: { in: accountIds } },
     include: { instrument: true },
   });
 
   const rows: PositionRow[] = [];
   for (const p of positions) {
     const snapshot = await prisma.positionSnapshot.findFirst({
-      where: { ibkrAccountId: p.ibkrAccountId, instrumentId: p.instrumentId },
+      where: { brokerAccountId: p.brokerAccountId, instrumentId: p.instrumentId },
       orderBy: { date: "desc" },
     });
 
@@ -142,18 +142,18 @@ export async function getHeaderStats(userId: string): Promise<HeaderStats> {
 
   const [todayExecutions, positions, account] = await Promise.all([
     prisma.execution.findMany({
-      where: { ibkrAccountId: { in: accountIds }, tradeDate: todayUtc },
+      where: { brokerAccountId: { in: accountIds }, tradeDate: todayUtc },
       select: { fifoPnlRealized: true, fxRateToBase: true },
     }),
     prisma.position.findMany({
-      where: { ibkrAccountId: { in: accountIds } },
+      where: { brokerAccountId: { in: accountIds } },
       include: {
         instrument: {
           select: { symbol: true, occSymbol: true, secType: true, multiplier: true },
         },
       },
     }),
-    prisma.ibkrAccount.findFirst({
+    prisma.brokerAccount.findFirst({
       where: { id: { in: accountIds } },
       select: { baseCurrency: true },
     }),
@@ -220,7 +220,7 @@ export async function getJournal(userId: string): Promise<{
 }> {
   const accountIds = await userAccountIds(userId);
   const trips = await prisma.roundTrip.findMany({
-    where: { ibkrAccountId: { in: accountIds } },
+    where: { brokerAccountId: { in: accountIds } },
     include: {
       instrument: true,
       _count: { select: { executions: true } },
@@ -253,7 +253,7 @@ export async function getJournal(userId: string): Promise<{
 
   // KPI globaux au niveau exécution (devise de base via fxRateToBase)
   const executions = await prisma.execution.findMany({
-    where: { ibkrAccountId: { in: accountIds } },
+    where: { brokerAccountId: { in: accountIds } },
     select: { fifoPnlRealized: true, commission: true, fxRateToBase: true },
   });
   let realized = 0;
@@ -334,7 +334,7 @@ export async function getDashboard(userId: string): Promise<DashboardData> {
   let baseCurrency = "EUR";
   for (const accountId of accountIds) {
     const snap = await prisma.accountSnapshot.findFirst({
-      where: { ibkrAccountId: accountId },
+      where: { brokerAccountId: accountId },
       orderBy: { date: "desc" },
     });
     if (snap) {
@@ -349,7 +349,7 @@ export async function getDashboard(userId: string): Promise<DashboardData> {
   // Réalisé / frais (niveau exécution, converti en base)
   const executions = await prisma.execution.findMany({
     where: {
-      ibkrAccountId: { in: accountIds },
+      brokerAccountId: { in: accountIds },
       tradeDate: { gte: monthStartUtc },
     },
     select: {
@@ -376,7 +376,7 @@ export async function getDashboard(userId: string): Promise<DashboardData> {
 
   const mtdClosed = await prisma.roundTrip.findMany({
     where: {
-      ibkrAccountId: { in: accountIds },
+      brokerAccountId: { in: accountIds },
       status: "CLOSED",
       closedAt: { gte: monthStartUtc },
     },
@@ -389,7 +389,7 @@ export async function getDashboard(userId: string): Promise<DashboardData> {
   // Courbe d'equity (180 jours, sommée par date)
   const snapshots = await prisma.accountSnapshot.findMany({
     where: {
-      ibkrAccountId: { in: accountIds },
+      brokerAccountId: { in: accountIds },
       date: { gte: new Date(now.getTime() - 180 * 86_400_000) },
     },
     orderBy: { date: "asc" },
@@ -407,7 +407,7 @@ export async function getDashboard(userId: string): Promise<DashboardData> {
   // Échéances options ≤ 7 jours
   const optPositions = await prisma.position.findMany({
     where: {
-      ibkrAccountId: { in: accountIds },
+      brokerAccountId: { in: accountIds },
       instrument: {
         secType: "OPT",
         expiry: { lte: new Date(now.getTime() + 7 * 86_400_000) },
@@ -417,7 +417,7 @@ export async function getDashboard(userId: string): Promise<DashboardData> {
   });
 
   const recentExecutions = await prisma.execution.findMany({
-    where: { ibkrAccountId: { in: accountIds } },
+    where: { brokerAccountId: { in: accountIds } },
     orderBy: { tradeTime: "desc" },
     take: 8,
     include: { instrument: { select: { symbol: true } } },

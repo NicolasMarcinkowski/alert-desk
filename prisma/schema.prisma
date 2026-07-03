@@ -33,7 +33,7 @@ model User {
 
   accounts             Account[]
   sessions             Session[]
-  ibkrAccounts         IbkrAccount[]
+  brokerAccounts         BrokerAccount[]
   watchlists           Watchlist[]
   alertRules           AlertRule[]
   notificationChannels NotificationChannel[]
@@ -89,16 +89,18 @@ model VerificationToken {
 // SCHEMA: app — Lien IBKR & synchronisation
 // =============================================================================
 
-model IbkrAccount {
-  id                 String            @id @default(uuid())
-  userId             String            @map("user_id")
+model BrokerAccount {
+  id                 String              @id @default(uuid())
+  userId             String              @map("user_id")
   label              String
-  /// "U1234567" — appris au premier import Flex
-  ibkrAccountId      String?           @unique @map("ibkr_account_id")
-  baseCurrency       String            @default("EUR") @map("base_currency")
-  /// Token Flex Web Service, chiffré (crypto/seal)
-  flexTokenEncrypted String            @map("flex_token_encrypted")
-  status             IbkrAccountStatus @default(ACTIVE)
+  /// MANUAL = saisie d'ordres à la main ; IBKR = lié via Flex Web Service
+  broker             BrokerType          @default(IBKR)
+  /// N° de compte côté broker ("U1234567" IBKR, appris au premier import)
+  externalAccountId  String?             @unique @map("external_account_id")
+  baseCurrency       String              @default("EUR") @map("base_currency")
+  /// Token Flex Web Service, chiffré (crypto/seal) — null pour MANUAL
+  flexTokenEncrypted String?             @map("flex_token_encrypted")
+  status             BrokerAccountStatus @default(ACTIVE)
   createdAt          DateTime          @default(now()) @map("created_at")
   updatedAt          DateTime          @updatedAt @map("updated_at")
 
@@ -116,13 +118,13 @@ model IbkrAccount {
   alertRules        AlertRule[]
 
   @@index([userId])
-  @@map("ibkr_accounts")
+  @@map("broker_accounts")
   @@schema("app")
 }
 
 model FlexQuery {
   id            String        @id @default(uuid())
-  ibkrAccountId String        @map("ibkr_account_id")
+  brokerAccountId String        @map("broker_account_id")
   /// Flex Query ID côté IBKR (non secret)
   queryId       String        @map("query_id")
   type          FlexQueryType
@@ -130,9 +132,9 @@ model FlexQuery {
   lastRunAt     DateTime?     @map("last_run_at")
   lastSuccessAt DateTime?     @map("last_success_at")
 
-  account IbkrAccount @relation(fields: [ibkrAccountId], references: [id], onDelete: Cascade)
+  account BrokerAccount @relation(fields: [brokerAccountId], references: [id], onDelete: Cascade)
 
-  @@unique([ibkrAccountId, queryId])
+  @@unique([brokerAccountId, queryId])
   @@map("flex_queries")
   @@schema("app")
 }
@@ -140,7 +142,7 @@ model FlexQuery {
 model SyncRun {
   id            String      @id @default(uuid())
   /// null = run global (tous comptes)
-  ibkrAccountId String?     @map("ibkr_account_id")
+  brokerAccountId String?     @map("broker_account_id")
   kind          SyncKind
   trigger       SyncTrigger
   status        SyncStatus  @default(RUNNING)
@@ -152,11 +154,11 @@ model SyncRun {
   duplicates    Int         @default(0)
   errors        String?
 
-  account IbkrAccount? @relation(fields: [ibkrAccountId], references: [id], onDelete: SetNull)
+  account BrokerAccount? @relation(fields: [brokerAccountId], references: [id], onDelete: SetNull)
 
   @@index([startedAt])
   @@index([status])
-  @@index([ibkrAccountId, kind, startedAt])
+  @@index([brokerAccountId, kind, startedAt])
   @@map("sync_runs")
   @@schema("app")
 }
@@ -203,7 +205,7 @@ model AlertRule {
   /// Pour les règles prix / % jour
   symbol          String?
   /// Pour les règles P&L de position
-  ibkrAccountId   String?       @map("ibkr_account_id")
+  brokerAccountId   String?       @map("broker_account_id")
   instrumentId    String?       @map("instrument_id")
   /// Prix, %, ou montant P&L (devise de base) selon le type
   threshold       Decimal       @db.Decimal(18, 6)
@@ -218,7 +220,7 @@ model AlertRule {
   createdAt       DateTime      @default(now()) @map("created_at")
 
   user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
-  ibkrAccount IbkrAccount? @relation(fields: [ibkrAccountId], references: [id], onDelete: Cascade)
+  ibkrAccount BrokerAccount? @relation(fields: [brokerAccountId], references: [id], onDelete: Cascade)
   instrument  Instrument?  @relation(fields: [instrumentId], references: [id], onDelete: Cascade)
   events      AlertEvent[]
 
@@ -268,7 +270,7 @@ model NotificationChannel {
 /// XML Flex complet, persisté AVANT parsing — source de vérité rejouable
 model FlexStatementRaw {
   id            String    @id @default(uuid())
-  ibkrAccountId String    @map("ibkr_account_id")
+  brokerAccountId String    @map("broker_account_id")
   flexQueryId   String    @map("flex_query_id")
   referenceCode String    @map("reference_code")
   payload       String
@@ -278,7 +280,7 @@ model FlexStatementRaw {
   processedAt   DateTime? @map("processed_at")
   processedOk   Boolean   @default(false) @map("processed_ok")
 
-  @@index([ibkrAccountId, fetchedAt])
+  @@index([brokerAccountId, fetchedAt])
   @@index([processedOk])
   @@map("flex_statement_raw")
   @@schema("flex_raw")
@@ -327,7 +329,7 @@ model Instrument {
 
 model Execution {
   id                  String          @id @default(uuid())
-  ibkrAccountId       String          @map("ibkr_account_id")
+  brokerAccountId       String          @map("broker_account_id")
   instrumentId        String          @map("instrument_id")
   /// ibExecID > transactionID > sha256 stable (champs volatils exclus)
   dedupeKey           String          @map("dedupe_key")
@@ -359,13 +361,13 @@ model Execution {
   roundTripId         String?         @map("round_trip_id")
   createdAt           DateTime        @default(now()) @map("created_at")
 
-  account    IbkrAccount @relation(fields: [ibkrAccountId], references: [id], onDelete: Cascade)
+  account    BrokerAccount @relation(fields: [brokerAccountId], references: [id], onDelete: Cascade)
   instrument Instrument  @relation(fields: [instrumentId], references: [id])
   roundTrip  RoundTrip?  @relation(fields: [roundTripId], references: [id], onDelete: SetNull)
 
-  @@unique([ibkrAccountId, dedupeKey])
-  @@index([ibkrAccountId, tradeDate])
-  @@index([ibkrAccountId, instrumentId, tradeTime])
+  @@unique([brokerAccountId, dedupeKey])
+  @@index([brokerAccountId, tradeDate])
+  @@index([brokerAccountId, instrumentId, tradeTime])
   @@index([roundTripId])
   @@map("executions")
   @@schema("trading")
@@ -376,7 +378,7 @@ model Execution {
 /// jamais de delete-and-recreate.
 model RoundTrip {
   id               String          @id @default(uuid())
-  ibkrAccountId    String          @map("ibkr_account_id")
+  brokerAccountId    String          @map("broker_account_id")
   instrumentId     String          @map("instrument_id")
   /// dedupeKey du premier fill = identité stable
   openExecutionKey String          @map("open_execution_key")
@@ -397,12 +399,12 @@ model RoundTrip {
   notes            String?
   rating           Int?
 
-  account    IbkrAccount @relation(fields: [ibkrAccountId], references: [id], onDelete: Cascade)
+  account    BrokerAccount @relation(fields: [brokerAccountId], references: [id], onDelete: Cascade)
   instrument Instrument  @relation(fields: [instrumentId], references: [id])
   executions Execution[]
 
-  @@unique([ibkrAccountId, openExecutionKey])
-  @@index([ibkrAccountId, status])
+  @@unique([brokerAccountId, openExecutionKey])
+  @@index([brokerAccountId, status])
   @@index([instrumentId])
   @@index([closedAt])
   @@map("round_trips")
@@ -412,7 +414,7 @@ model RoundTrip {
 /// Position courante réconciliée (matérialisée à chaque sync)
 model Position {
   id            String        @id @default(uuid())
-  ibkrAccountId String        @map("ibkr_account_id")
+  brokerAccountId String        @map("broker_account_id")
   instrumentId  String        @map("instrument_id")
   /// Signée (négatif = short)
   quantity      Decimal       @db.Decimal(18, 4)
@@ -424,10 +426,10 @@ model Position {
   driftDetected Boolean       @default(false) @map("drift_detected")
   updatedAt     DateTime      @updatedAt @map("updated_at")
 
-  account    IbkrAccount @relation(fields: [ibkrAccountId], references: [id], onDelete: Cascade)
+  account    BrokerAccount @relation(fields: [brokerAccountId], references: [id], onDelete: Cascade)
   instrument Instrument  @relation(fields: [instrumentId], references: [id])
 
-  @@unique([ibkrAccountId, instrumentId])
+  @@unique([brokerAccountId, instrumentId])
   @@map("positions")
   @@schema("trading")
 }
@@ -435,7 +437,7 @@ model Position {
 /// Snapshot quotidien autoritaire des positions ouvertes (Activity Flex OpenPositions)
 model PositionSnapshot {
   id             String   @id @default(uuid())
-  ibkrAccountId  String   @map("ibkr_account_id")
+  brokerAccountId  String   @map("broker_account_id")
   instrumentId   String   @map("instrument_id")
   date           DateTime @db.Date
   quantity       Decimal  @db.Decimal(18, 4)
@@ -446,11 +448,11 @@ model PositionSnapshot {
   currency       String
   fxRateToBase   Decimal  @map("fx_rate_to_base") @db.Decimal(18, 8)
 
-  account    IbkrAccount @relation(fields: [ibkrAccountId], references: [id], onDelete: Cascade)
+  account    BrokerAccount @relation(fields: [brokerAccountId], references: [id], onDelete: Cascade)
   instrument Instrument  @relation(fields: [instrumentId], references: [id])
 
-  @@unique([ibkrAccountId, date, instrumentId])
-  @@index([ibkrAccountId, date])
+  @@unique([brokerAccountId, date, instrumentId])
+  @@index([brokerAccountId, date])
   @@map("position_snapshots")
   @@schema("trading")
 }
@@ -458,7 +460,7 @@ model PositionSnapshot {
 /// Snapshot quotidien NAV/equity (Activity Flex EquitySummaryInBase / ChangeInNAV)
 model AccountSnapshot {
   id                  String   @id @default(uuid())
-  ibkrAccountId       String   @map("ibkr_account_id")
+  brokerAccountId       String   @map("broker_account_id")
   date                DateTime @db.Date
   /// Devise de base
   nav                 Decimal  @db.Decimal(18, 4)
@@ -470,9 +472,9 @@ model AccountSnapshot {
   fees                Decimal  @default(0) @db.Decimal(18, 4)
   baseCurrency        String   @map("base_currency")
 
-  account IbkrAccount @relation(fields: [ibkrAccountId], references: [id], onDelete: Cascade)
+  account BrokerAccount @relation(fields: [brokerAccountId], references: [id], onDelete: Cascade)
 
-  @@unique([ibkrAccountId, date])
+  @@unique([brokerAccountId, date])
   @@map("account_snapshots")
   @@schema("trading")
 }
@@ -480,15 +482,15 @@ model AccountSnapshot {
 /// Solde de cash par devise et par jour (Activity Flex CashReport)
 model CashBalance {
   id            String   @id @default(uuid())
-  ibkrAccountId String   @map("ibkr_account_id")
+  brokerAccountId String   @map("broker_account_id")
   date          DateTime @db.Date
   currency      String
   amount        Decimal  @db.Decimal(18, 4)
   fxRateToBase  Decimal  @map("fx_rate_to_base") @db.Decimal(18, 8)
 
-  account IbkrAccount @relation(fields: [ibkrAccountId], references: [id], onDelete: Cascade)
+  account BrokerAccount @relation(fields: [brokerAccountId], references: [id], onDelete: Cascade)
 
-  @@unique([ibkrAccountId, date, currency])
+  @@unique([brokerAccountId, date, currency])
   @@map("cash_balances")
   @@schema("trading")
 }
@@ -496,7 +498,7 @@ model CashBalance {
 /// Dividendes, retenues, intérêts, frais, dépôts/retraits
 model CashTransaction {
   id            String              @id @default(uuid())
-  ibkrAccountId String              @map("ibkr_account_id")
+  brokerAccountId String              @map("broker_account_id")
   instrumentId  String?             @map("instrument_id")
   type          CashTransactionType
   amount        Decimal             @db.Decimal(18, 4)
@@ -506,18 +508,18 @@ model CashTransaction {
   description   String?
   transactionId String              @map("transaction_id")
 
-  account    IbkrAccount @relation(fields: [ibkrAccountId], references: [id], onDelete: Cascade)
+  account    BrokerAccount @relation(fields: [brokerAccountId], references: [id], onDelete: Cascade)
   instrument Instrument? @relation(fields: [instrumentId], references: [id], onDelete: SetNull)
 
-  @@unique([ibkrAccountId, transactionId])
-  @@index([ibkrAccountId, dateTime])
+  @@unique([brokerAccountId, transactionId])
+  @@index([brokerAccountId, dateTime])
   @@map("cash_transactions")
   @@schema("trading")
 }
 
 model CorporateAction {
   id            String    @id @default(uuid())
-  ibkrAccountId String    @map("ibkr_account_id")
+  brokerAccountId String    @map("broker_account_id")
   instrumentId  String?   @map("instrument_id")
   ibkrType      String    @map("ibkr_type")
   description   String?
@@ -526,10 +528,10 @@ model CorporateAction {
   value         Decimal?  @db.Decimal(18, 4)
   transactionId String    @map("transaction_id")
 
-  account    IbkrAccount @relation(fields: [ibkrAccountId], references: [id], onDelete: Cascade)
+  account    BrokerAccount @relation(fields: [brokerAccountId], references: [id], onDelete: Cascade)
   instrument Instrument? @relation(fields: [instrumentId], references: [id], onDelete: SetNull)
 
-  @@unique([ibkrAccountId, transactionId])
+  @@unique([brokerAccountId, transactionId])
   @@map("corporate_actions")
   @@schema("trading")
 }
@@ -564,6 +566,7 @@ enum OrderSide {
 enum ExecutionSource {
   TRADE_CONFIRMS
   ACTIVITY
+  MANUAL
 
   @@schema("trading")
 }
@@ -631,7 +634,14 @@ enum SyncStatus {
   @@schema("app")
 }
 
-enum IbkrAccountStatus {
+enum BrokerType {
+  MANUAL
+  IBKR
+
+  @@schema("app")
+}
+
+enum BrokerAccountStatus {
   ACTIVE
   AUTH_ERROR
   DISABLED

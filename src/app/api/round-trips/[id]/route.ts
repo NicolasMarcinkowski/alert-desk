@@ -41,6 +41,7 @@ export async function GET(
           fifoPnlRealized: true,
           confirmedByActivity: true,
           ibkrCodes: true,
+          source: true,
         },
       },
     },

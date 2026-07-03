@@ -3,10 +3,11 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 
-export interface IbkrAccountView {
+export interface BrokerAccountView {
   id: string;
   label: string;
-  ibkrAccountId: string | null;
+  broker: "MANUAL" | "IBKR";
+  externalAccountId: string | null;
   baseCurrency: string;
   status: "ACTIVE" | "AUTH_ERROR" | "DISABLED";
   queries: {
@@ -17,7 +18,7 @@ export interface IbkrAccountView {
 }
 
 const STATUS_BADGE: Record<
-  IbkrAccountView["status"],
+  BrokerAccountView["status"],
   { label: string; className: string }
 > = {
   ACTIVE: {
@@ -43,10 +44,10 @@ function formatDateTime(iso: string | null): string {
   }).format(new Date(iso));
 }
 
-export function IbkrAccountsPanel({
+export function BrokerAccountsPanel({
   accounts,
 }: {
-  accounts: IbkrAccountView[];
+  accounts: BrokerAccountView[];
 }) {
   const router = useRouter();
   const [busy, setBusy] = useState<string | null>(null);
@@ -149,7 +150,9 @@ export function IbkrAccountsPanel({
               <div className="flex items-center gap-3">
                 <span className="text-sm font-semibold">{account.label}</span>
                 <span className="font-mono text-xs text-ink-mute">
-                  {account.ibkrAccountId ?? "ID appris au 1er import"}
+                  {account.broker === "MANUAL"
+                    ? "saisie manuelle"
+                    : (account.externalAccountId ?? "ID appris au 1er import")}
                 </span>
                 <span
                   className={`rounded border px-1.5 py-px text-[10px] font-semibold ${badge.className}`}
@@ -161,40 +164,44 @@ export function IbkrAccountsPanel({
                 </span>
               </div>
               <div className="flex items-center gap-2">
-                <button
-                  className={btnClass}
-                  disabled={busy !== null}
-                  onClick={() =>
-                    call(
-                      `test:${account.id}`,
-                      () =>
-                        fetch(`/api/accounts/${account.id}/test`, {
-                          method: "POST",
-                        }),
-                      "Connexion Flex OK sur toutes les queries."
-                    )
-                  }
-                >
-                  {busy === `test:${account.id}` ? "Test…" : "Tester"}
-                </button>
-                <button
-                  className={btnClass}
-                  disabled={busy !== null}
-                  onClick={() =>
-                    call(
-                      `sync:${account.id}`,
-                      () =>
-                        fetch("/api/sync", {
-                          method: "POST",
-                          headers: { "Content-Type": "application/json" },
-                          body: JSON.stringify({ accountId: account.id }),
-                        }),
-                      "Sync terminée."
-                    )
-                  }
-                >
-                  {busy === `sync:${account.id}` ? "Sync…" : "Sync now"}
-                </button>
+                {account.broker === "IBKR" && (
+                  <>
+                    <button
+                      className={btnClass}
+                      disabled={busy !== null}
+                      onClick={() =>
+                        call(
+                          `test:${account.id}`,
+                          () =>
+                            fetch(`/api/accounts/${account.id}/test`, {
+                              method: "POST",
+                            }),
+                          "Connexion Flex OK sur toutes les queries."
+                        )
+                      }
+                    >
+                      {busy === `test:${account.id}` ? "Test…" : "Tester"}
+                    </button>
+                    <button
+                      className={btnClass}
+                      disabled={busy !== null}
+                      onClick={() =>
+                        call(
+                          `sync:${account.id}`,
+                          () =>
+                            fetch("/api/sync", {
+                              method: "POST",
+                              headers: { "Content-Type": "application/json" },
+                              body: JSON.stringify({ accountId: account.id }),
+                            }),
+                          "Sync terminée."
+                        )
+                      }
+                    >
+                      {busy === `sync:${account.id}` ? "Sync…" : "Sync now"}
+                    </button>
+                  </>
+                )}
                 <button
                   className={`${btnClass} hover:border-loss/50 hover:text-loss`}
                   disabled={busy !== null}
@@ -219,7 +226,11 @@ export function IbkrAccountsPanel({
                 </button>
               </div>
             </div>
-            <div className="mt-3 grid gap-2 text-xs text-ink-soft sm:grid-cols-2">
+            <div
+              className={`mt-3 grid gap-2 text-xs text-ink-soft sm:grid-cols-2 ${
+                account.broker === "MANUAL" ? "hidden" : ""
+              }`}
+            >
               {account.queries.map((q) => (
                 <div
                   key={q.type}

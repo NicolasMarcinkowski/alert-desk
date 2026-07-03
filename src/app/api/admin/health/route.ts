@@ -8,7 +8,7 @@ export async function GET(request: Request) {
   try {
     const [accounts, executions, positions, roundTrips, lastRun] =
       await Promise.all([
-        prisma.ibkrAccount.count(),
+        prisma.brokerAccount.count(),
         prisma.execution.count(),
         prisma.position.count(),
         prisma.roundTrip.count(),

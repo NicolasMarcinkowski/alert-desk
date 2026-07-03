@@ -2,6 +2,7 @@ import Link from "next/link";
 import { auth } from "@/lib/auth";
 import { getDashboard, getHeaderStats } from "@/lib/db/queries";
 import { LiveIntradayTile } from "@/components/dashboard/LiveIntradayTile";
+import { AddOrderButton } from "@/components/orders/AddOrderButton";
 import { Card } from "@/components/ui/Card";
 import { KpiTile } from "@/components/ui/KpiTile";
 import { EquityCurve } from "@/components/ui/EquityCurve";
@@ -34,13 +35,16 @@ export default async function DashboardPage() {
       />
 
       {!data.hasAccounts && (
-        <p className="mb-4 rounded-lg border border-accent/30 bg-accent/10 px-4 py-2.5 text-sm">
-          Aucun compte IBKR relié —{" "}
-          <Link href="/reglages" className="font-medium text-accent underline">
-            configure ton token Flex dans les réglages
-          </Link>{" "}
-          pour importer tes ordres.
-        </p>
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-accent/30 bg-accent/10 px-4 py-2.5 text-sm">
+          <span>
+            Commence par ajouter ton premier ordre à la main — ou{" "}
+            <Link href="/reglages" className="font-medium text-accent underline">
+              relie un compte IBKR
+            </Link>{" "}
+            pour l&apos;import automatique.
+          </span>
+          <AddOrderButton variant="ghost" />
+        </div>
       )}
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-3 xl:grid-cols-6">

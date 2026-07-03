@@ -1,8 +1,14 @@
 # Alert Desk
 
-Tracker de trading self-hosted : import automatique des ordres IBKR (actions + options) via le **Flex Web Service**, suivi quasi temps réel des positions, journal de trades, watchlist et alertes de prix avec notifications Telegram/Discord.
+Tracker de trading self-hosted : **saisie manuelle d'ordres** (actions, options, autres) sans dépendre d'aucun broker, suivi quasi temps réel des positions, journal de trades, watchlist et alertes de prix avec notifications Telegram/Discord.
+
+En option, un compte **IBKR** peut être lié pour l'import automatique des ordres via le Flex Web Service (le modèle `BrokerAccount` est extensible à d'autres connecteurs — Trade Republic n'a pas d'API officielle : saisie manuelle ou import CSV à venir).
 
 Multi-utilisateurs (≤5, Google OAuth + allowlist), hébergé en Docker sur NAS.
+
+## Saisie manuelle (v0)
+
+Bouton « + Ajouter un ordre » (Positions, Journal, Dashboard) : on saisit des **exécutions** — le pipeline (positions, round-trips, analytics, quotes live, alertes) est identique pour tous les brokers. Le P&L réalisé des ordres manuels est calculé en **méthode PRU moyen** (les ordres IBKR gardent le FIFO exact du broker). Les exécutions manuelles sont supprimables depuis le détail d'un trade ; le compte « Portefeuille manuel » est créé automatiquement au premier ordre.
 
 ## Stack
 

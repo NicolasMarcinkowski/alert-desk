@@ -6,19 +6,19 @@ export async function GET() {
   if (!session) return unauthorized();
 
   const accountIds = (
-    await prisma.ibkrAccount.findMany({
+    await prisma.brokerAccount.findMany({
       where: { userId: session.user.id },
       select: { id: true },
     })
   ).map((a) => a.id);
 
   const runs = await prisma.syncRun.findMany({
-    where: { ibkrAccountId: { in: accountIds } },
+    where: { brokerAccountId: { in: accountIds } },
     orderBy: { startedAt: "desc" },
     take: 20,
     select: {
       id: true,
-      ibkrAccountId: true,
+      brokerAccountId: true,
       kind: true,
       trigger: true,
       status: true,
@@ -33,7 +33,7 @@ export async function GET() {
   });
 
   const lastSuccess = await prisma.syncRun.findFirst({
-    where: { ibkrAccountId: { in: accountIds }, status: "SUCCESS" },
+    where: { brokerAccountId: { in: accountIds }, status: "SUCCESS" },
     orderBy: { finishedAt: "desc" },
     select: { finishedAt: true, kind: true },
   });

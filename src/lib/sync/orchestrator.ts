@@ -43,7 +43,7 @@ function serialize<T>(key: string, fn: () => Promise<T>): Promise<T> {
 export type SyncKindInput = "TRADE_CONFIRMS" | "ACTIVITY";
 
 export interface SyncAccountResult {
-  ibkrAccountId: string;
+  brokerAccountId: string;
   label: string;
   status: "SUCCESS" | "ERROR" | "SKIPPED";
   message?: string;
@@ -78,7 +78,7 @@ export async function processStatementXml(
 ): Promise<{ counters: ImportCounters; warnings: string[] }> {
   const raw = await prisma.flexStatementRaw.create({
     data: {
-      ibkrAccountId: accountDbId,
+      brokerAccountId: accountDbId,
       flexQueryId,
       referenceCode,
       payload: xml,
@@ -99,21 +99,21 @@ export async function processStatementXml(
   let counters = emptyCounters();
   const warnings: string[] = [];
 
-  const account = await prisma.ibkrAccount.findUniqueOrThrow({
+  const account = await prisma.brokerAccount.findUniqueOrThrow({
     where: { id: accountDbId },
   });
 
   for (const statement of statements) {
-    // Apprentissage / contrôle de l'accountId IBKR
-    if (!account.ibkrAccountId) {
-      await prisma.ibkrAccount.update({
+    // Apprentissage / contrôle du n° de compte côté broker
+    if (!account.externalAccountId) {
+      await prisma.brokerAccount.update({
         where: { id: accountDbId },
-        data: { ibkrAccountId: statement.accountId },
+        data: { externalAccountId: statement.accountId },
       });
-      account.ibkrAccountId = statement.accountId;
-    } else if (account.ibkrAccountId !== statement.accountId) {
+      account.externalAccountId = statement.accountId;
+    } else if (account.externalAccountId !== statement.accountId) {
       throw new Error(
-        `Le relevé concerne ${statement.accountId} mais le compte lié est ${account.ibkrAccountId}`
+        `Le relevé concerne ${statement.accountId} mais le compte lié est ${account.externalAccountId}`
       );
     }
 
@@ -153,13 +153,13 @@ async function syncOneAccount(
   trigger: SyncTrigger,
   force: boolean
 ): Promise<SyncAccountResult> {
-  const account = await prisma.ibkrAccount.findUniqueOrThrow({
+  const account = await prisma.brokerAccount.findUniqueOrThrow({
     where: { id: accountDbId },
     include: { flexQueries: { where: { type: kind, enabled: true } } },
   });
 
   const base: Omit<SyncAccountResult, "status"> = {
-    ibkrAccountId: account.id,
+    brokerAccountId: account.id,
     label: account.label,
     counters: emptyCounters(),
     warnings: [],
@@ -167,6 +167,9 @@ async function syncOneAccount(
 
   if (account.status === "DISABLED") {
     return { ...base, status: "SKIPPED", message: "Compte désactivé" };
+  }
+  if (account.broker !== "IBKR" || !account.flexTokenEncrypted) {
+    return { ...base, status: "SKIPPED", message: "Compte sans lien broker (manuel)" };
   }
   if (account.flexQueries.length === 0) {
     return {
@@ -193,7 +196,7 @@ async function syncOneAccount(
   // Mutex : run encore vivant ?
   const running = await prisma.syncRun.findFirst({
     where: {
-      ibkrAccountId: account.id,
+      brokerAccountId: account.id,
       kind,
       status: "RUNNING",
       startedAt: { gt: new Date(Date.now() - STALE_RUNNING_MS) },
@@ -204,7 +207,7 @@ async function syncOneAccount(
   }
 
   const run = await prisma.syncRun.create({
-    data: { ibkrAccountId: account.id, kind, trigger },
+    data: { brokerAccountId: account.id, kind, trigger },
   });
 
   try {
@@ -243,7 +246,7 @@ async function syncOneAccount(
 
     // Un compte en AUTH_ERROR qui resynchronise avec succès redevient ACTIVE
     if (account.status === "AUTH_ERROR") {
-      await prisma.ibkrAccount.update({
+      await prisma.brokerAccount.update({
         where: { id: account.id },
         data: { status: "ACTIVE" },
       });
@@ -266,7 +269,7 @@ async function syncOneAccount(
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
     if (e instanceof FlexError && e.kind === "AUTH") {
-      await prisma.ibkrAccount.update({
+      await prisma.brokerAccount.update({
         where: { id: account.id },
         data: { status: "AUTH_ERROR" },
       });
@@ -284,18 +287,20 @@ async function syncOneAccount(
  * Les comptes sont traités séquentiellement (sérialisation par token).
  */
 export async function runSync(options: {
-  ibkrAccountId?: string;
+  brokerAccountId?: string;
   /** Restreint aux comptes de cet utilisateur (sync manuelle) ; absent = flotte (cron) */
   userId?: string;
   kind: SyncKindInput;
   trigger: SyncTrigger;
   force?: boolean;
 }): Promise<SyncAccountResult[]> {
-  const accounts = await prisma.ibkrAccount.findMany({
+  const accounts = await prisma.brokerAccount.findMany({
     where: {
-      ...(options.ibkrAccountId ? { id: options.ibkrAccountId } : {}),
+      ...(options.brokerAccountId ? { id: options.brokerAccountId } : {}),
       ...(options.userId ? { userId: options.userId } : {}),
-      ...(options.ibkrAccountId ? {} : { status: { not: "DISABLED" } }),
+      ...(options.brokerAccountId
+        ? {}
+        : { status: { not: "DISABLED" }, broker: "IBKR" }),
     },
   });
 

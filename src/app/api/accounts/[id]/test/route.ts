@@ -12,12 +12,18 @@ export async function POST(
   if (!session) return unauthorized();
   const { id } = await params;
 
-  const account = await prisma.ibkrAccount.findFirst({
+  const account = await prisma.brokerAccount.findFirst({
     where: { id, userId: session.user.id },
     include: { flexQueries: { where: { enabled: true } } },
   });
   if (!account) return unauthorized();
 
+  if (account.broker !== "IBKR" || !account.flexTokenEncrypted) {
+    return Response.json(
+      { error: "Compte manuel — rien à tester" },
+      { status: 400 }
+    );
+  }
   const token = open(account.flexTokenEncrypted);
   const results: { queryId: string; type: string; ok: boolean; error?: string }[] =
     [];
@@ -29,7 +35,7 @@ export async function POST(
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
       if (e instanceof FlexError && e.kind === "AUTH") {
-        await prisma.ibkrAccount.update({
+        await prisma.brokerAccount.update({
           where: { id },
           data: { status: "AUTH_ERROR" },
         });
@@ -45,7 +51,7 @@ export async function POST(
 
   const allOk = results.length > 0 && results.every((r) => r.ok);
   if (allOk && account.status === "AUTH_ERROR") {
-    await prisma.ibkrAccount.update({
+    await prisma.brokerAccount.update({
       where: { id },
       data: { status: "ACTIVE" },
     });

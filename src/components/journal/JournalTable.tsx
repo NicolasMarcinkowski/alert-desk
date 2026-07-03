@@ -43,6 +43,7 @@ interface TripDetail {
     fifoPnlRealized: string | null;
     confirmedByActivity: boolean;
     ibkrCodes: string | null;
+    source: "TRADE_CONFIRMS" | "ACTIVITY" | "MANUAL";
   }[];
   instrument: { multiplier: string; secType: string };
 }
@@ -164,9 +165,38 @@ function DetailPanel({
                   </span>
                 )}
               </span>
-              <span className="text-xs text-ink-mute">
+              <span className="flex items-center gap-2 text-xs text-ink-mute">
                 {formatDateTime(new Date(e.tradeTime))} · frais{" "}
                 {formatMoney(Math.abs(Number(e.commission)), e.currency)}
+                {e.source === "MANUAL" && (
+                  <button
+                    type="button"
+                    title="Supprimer cette exécution saisie manuellement"
+                    onClick={async () => {
+                      if (!window.confirm("Supprimer cette exécution ?")) return;
+                      const res = await fetch(`/api/executions/${e.id}`, {
+                        method: "DELETE",
+                      });
+                      if (res.ok) {
+                        setDetail(null);
+                        onSaved();
+                      }
+                    }}
+                    className="cursor-pointer rounded p-0.5 text-ink-mute hover:text-loss"
+                  >
+                    <svg
+                      width="12"
+                      height="12"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                    >
+                      <path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14M10 11v6M14 11v6" />
+                    </svg>
+                  </button>
+                )}
               </span>
             </li>
           ))}
@@ -206,7 +236,7 @@ function DetailPanel({
                     : "border-warn/30 bg-warn/10 text-warn"
                 }`}
               >
-                {trip.pnlConfirmed ? "CONFIRMÉ IBKR" : "ESTIMÉ"}
+                {trip.pnlConfirmed ? "CONFIRMÉ" : "ESTIMÉ"}
               </span>
             )}
           </span>

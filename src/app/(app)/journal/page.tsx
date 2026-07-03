@@ -8,6 +8,7 @@ import {
   type JournalTripView,
 } from "@/components/journal/JournalTable";
 import { formatMoney, formatPct, formatSignedMoney } from "@/lib/utils/format";
+import { AddOrderButton } from "@/components/orders/AddOrderButton";
 
 export const dynamic = "force-dynamic";
 
@@ -38,10 +39,13 @@ export default async function JournalPage() {
 
   return (
     <div>
-      <PageTitle
-        title="Journal de trades"
-        subtitle="Round-trips reconstruits depuis les exécutions IBKR — clique sur un trade pour le détail et les annotations"
-      />
+      <div className="flex items-start justify-between gap-3">
+        <PageTitle
+          title="Journal de trades"
+          subtitle="Round-trips reconstruits depuis tes exécutions — clique sur un trade pour le détail et les annotations"
+        />
+        <AddOrderButton />
+      </div>
 
       <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
         <KpiTile
@@ -78,8 +82,8 @@ export default async function JournalPage() {
       {trips.length === 0 ? (
         <Card>
           <p className="py-10 text-center text-sm text-ink-mute">
-            Aucun trade importé pour l&apos;instant. Les round-trips
-            apparaîtront après la première sync IBKR.
+            Aucun trade pour l&apos;instant. Ajoute ton premier ordre avec le
+            bouton ci-dessus, ou relie un compte IBKR dans les réglages.
           </p>
         </Card>
       ) : (

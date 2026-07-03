@@ -24,7 +24,7 @@ export async function POST(request: Request) {
 
   if (!accountId || !xml) return badRequest("accountId et xml requis");
 
-  const account = await prisma.ibkrAccount.findUnique({
+  const account = await prisma.brokerAccount.findUnique({
     where: { id: accountId },
   });
   if (!account) return badRequest("compte inconnu");

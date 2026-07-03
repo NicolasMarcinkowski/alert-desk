@@ -39,26 +39,69 @@ export async function rebuildRoundTrips(accountDbId: string): Promise<void> {
   const instruments = await prisma.execution.groupBy({
     by: ["instrumentId"],
     where: {
-      ibkrAccountId: accountDbId,
+      brokerAccountId: accountDbId,
       instrument: { secType: { in: ["STK", "OPT"] } },
     },
   });
 
   for (const { instrumentId } of instruments) {
     const executions = await prisma.execution.findMany({
-      where: { ibkrAccountId: accountDbId, instrumentId },
+      where: { brokerAccountId: accountDbId, instrumentId },
       orderBy: [{ tradeTime: "asc" }, { createdAt: "asc" }],
+      include: { instrument: { select: { multiplier: true } } },
     });
 
     const trips: TripDraft[] = [];
     let current: TripDraft | null = null;
     let runningQty = new D(0);
+    // Suivi du PRU moyen — sert au P&L des exécutions MANUAL (pas de
+    // fifoPnlRealized broker pour la saisie manuelle : on le calcule en
+    // méthode PRU moyen et on le matérialise sur l'exécution, ce qui rend
+    // journal/analytics/dashboard identiques pour tous les brokers).
+    let avgCost = new D(0);
 
     for (const e of executions) {
       const signed =
         e.side === "BUY" ? new D(e.quantity) : new D(e.quantity).neg();
       const before = runningQty;
       runningQty = runningQty.plus(signed);
+      const price = new D(e.price);
+      const multiplier = new D(e.instrument.multiplier);
+
+      const reducing =
+        !before.isZero() && before.isNegative() !== signed.isNegative();
+
+      if (e.source === "MANUAL" && reducing) {
+        const reduced = D.min(before.abs(), signed.abs());
+        const dirSign = before.isNegative() ? new D(-1) : new D(1);
+        const pnl = price
+          .minus(avgCost)
+          .times(reduced)
+          .times(multiplier)
+          .times(dirSign);
+        if (e.fifoPnlRealized === null || !new D(e.fifoPnlRealized).equals(pnl)) {
+          await prisma.execution.update({
+            where: { id: e.id },
+            data: { fifoPnlRealized: pnl },
+          });
+        }
+        e.fifoPnlRealized = pnl;
+      }
+
+      // Mise à jour du PRU moyen (renforcement pondéré / réduction inchangée /
+      // traversée de zéro = prix du fill)
+      if (before.isZero()) {
+        avgCost = price;
+      } else if (!reducing) {
+        avgCost = avgCost
+          .times(before.abs())
+          .plus(price.times(signed.abs()))
+          .div(runningQty.abs());
+      } else if (runningQty.isZero()) {
+        avgCost = new D(0);
+      } else if (before.isNegative() !== runningQty.isNegative()) {
+        avgCost = price;
+      }
 
       if (before.isZero() && !runningQty.isZero()) {
         current = {
@@ -139,14 +182,14 @@ export async function rebuildRoundTrips(accountDbId: string): Promise<void> {
 
       const saved = await prisma.roundTrip.upsert({
         where: {
-          ibkrAccountId_openExecutionKey: {
-            ibkrAccountId: accountDbId,
+          brokerAccountId_openExecutionKey: {
+            brokerAccountId: accountDbId,
             openExecutionKey: trip.openExecutionKey,
           },
         },
         // Jamais de delete-and-recreate : les annotations journal survivent
         create: {
-          ibkrAccountId: accountDbId,
+          brokerAccountId: accountDbId,
           instrumentId,
           openExecutionKey: trip.openExecutionKey,
           ...computed,
@@ -160,4 +203,9 @@ export async function rebuildRoundTrips(accountDbId: string): Promise<void> {
       });
     }
   }
+
+  // Trips orphelins (leur fill d'ouverture a été supprimé — saisie manuelle)
+  await prisma.roundTrip.deleteMany({
+    where: { brokerAccountId: accountDbId, executions: { none: {} } },
+  });
 }

@@ -10,13 +10,14 @@ export async function GET() {
   const session = await requireSession();
   if (!session) return unauthorized();
 
-  const accounts = await prisma.ibkrAccount.findMany({
+  const accounts = await prisma.brokerAccount.findMany({
     where: { userId: session.user.id },
     orderBy: { createdAt: "asc" },
     select: {
       id: true,
       label: true,
-      ibkrAccountId: true,
+      broker: true,
+      externalAccountId: true,
       baseCurrency: true,
       status: true,
       createdAt: true,
@@ -57,7 +58,7 @@ export async function POST(request: Request) {
     return badRequest("au moins un query ID requis");
   }
 
-  const account = await prisma.ibkrAccount.create({
+  const account = await prisma.brokerAccount.create({
     data: {
       userId: session.user.id,
       label,

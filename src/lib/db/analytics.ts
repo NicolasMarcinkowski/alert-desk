@@ -69,7 +69,7 @@ export async function getAnalytics(
   period: AnalyticsPeriod
 ): Promise<AnalyticsData> {
   const from = periodStart(period);
-  const accounts = await prisma.ibkrAccount.findMany({
+  const accounts = await prisma.brokerAccount.findMany({
     where: { userId },
     select: { id: true, baseCurrency: true },
   });
@@ -79,7 +79,7 @@ export async function getAnalytics(
   // Round-trips clôturés dans la période, avec leurs exécutions
   const trips = await prisma.roundTrip.findMany({
     where: {
-      ibkrAccountId: { in: accountIds },
+      brokerAccountId: { in: accountIds },
       status: "CLOSED",
       ...(from ? { closedAt: { gte: from } } : {}),
     },
@@ -121,7 +121,7 @@ export async function getAnalytics(
   // Courbe d'equity ajustée des dépôts/retraits + drawdown
   const snapshots = await prisma.accountSnapshot.findMany({
     where: {
-      ibkrAccountId: { in: accountIds },
+      brokerAccountId: { in: accountIds },
       ...(from ? { date: { gte: from } } : {}),
     },
     orderBy: { date: "asc" },
@@ -157,7 +157,7 @@ export async function getAnalytics(
   // P&L quotidien net (niveau exécution, par date de trade)
   const executions = await prisma.execution.findMany({
     where: {
-      ibkrAccountId: { in: accountIds },
+      brokerAccountId: { in: accountIds },
       ...(from ? { tradeDate: { gte: from } } : {}),
     },
     select: {

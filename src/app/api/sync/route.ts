@@ -30,7 +30,7 @@ export async function POST(request: Request) {
   for (const kind of kinds) {
     results.push(
       ...(await runSync({
-        ibkrAccountId: accountId,
+        brokerAccountId: accountId,
         userId: session.user.id,
         kind,
         trigger: "MANUAL",

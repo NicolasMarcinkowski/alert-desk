@@ -57,7 +57,7 @@ export async function POST(request: Request) {
 
   let symbol: string | undefined;
   let instrumentId: string | undefined;
-  let ibkrAccountId: string | undefined;
+  let brokerAccountId: string | undefined;
 
   if (isPrice) {
     symbol =
@@ -71,12 +71,12 @@ export async function POST(request: Request) {
     if (!instrumentId) return badRequest("instrumentId requis");
     const position = await prisma.position.findFirst({
       where: { instrumentId, account: { userId: session.user.id } },
-      select: { ibkrAccountId: true },
+      select: { brokerAccountId: true },
     });
     if (!position) {
       return badRequest("aucune position ouverte sur cet instrument");
     }
-    ibkrAccountId = position.ibkrAccountId;
+    brokerAccountId = position.brokerAccountId;
   }
 
   const rule = await prisma.alertRule.create({
@@ -85,7 +85,7 @@ export async function POST(request: Request) {
       type: type as (typeof PRICE_TYPES)[number],
       symbol,
       instrumentId,
-      ibkrAccountId,
+      brokerAccountId,
       threshold: threshold.toFixed(6),
       cooldownSeconds,
       rearmMode: rearmMode as (typeof REARM_MODES)[number],

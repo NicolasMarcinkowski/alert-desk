@@ -3,9 +3,9 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db/client";
 import { PageTitle } from "@/components/ui/PagePlaceholder";
 import {
-  IbkrAccountsPanel,
-  type IbkrAccountView,
-} from "@/components/settings/IbkrAccountsPanel";
+  BrokerAccountsPanel,
+  type BrokerAccountView,
+} from "@/components/settings/BrokerAccountsPanel";
 import {
   NotificationsPanel,
   type ChannelsState,
@@ -14,7 +14,7 @@ import {
 export const dynamic = "force-dynamic";
 
 const TABS = [
-  { key: "ibkr", label: "IBKR" },
+  { key: "ibkr", label: "Comptes" },
   { key: "notifs", label: "Notifications" },
 ] as const;
 
@@ -60,16 +60,17 @@ export default async function ReglagesPage({
 }
 
 async function IbkrTab({ userId }: { userId: string }) {
-  const accounts = await prisma.ibkrAccount.findMany({
+  const accounts = await prisma.brokerAccount.findMany({
     where: { userId },
     orderBy: { createdAt: "asc" },
     include: { flexQueries: true },
   });
 
-  const view: IbkrAccountView[] = accounts.map((a) => ({
+  const view: BrokerAccountView[] = accounts.map((a) => ({
     id: a.id,
     label: a.label,
-    ibkrAccountId: a.ibkrAccountId,
+    broker: a.broker,
+    externalAccountId: a.externalAccountId,
     baseCurrency: a.baseCurrency,
     status: a.status,
     queries: a.flexQueries.map((q) => ({
@@ -88,7 +89,7 @@ async function IbkrTab({ userId }: { userId: string }) {
         <span className="font-mono">fifoPnlRealized</span> — voir le README.
         Les tokens sont chiffrés en base (AES-256-GCM).
       </div>
-      <IbkrAccountsPanel accounts={view} />
+      <BrokerAccountsPanel accounts={view} />
     </>
   );
 }
