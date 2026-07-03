@@ -1,0 +1,35 @@
+# ═══════════════════════════════════════════════════════════════
+# Production — NAS UGREEN (/volume1/docker/alert-desk)
+# Un fichier .env est attendu à côté (voir .env.example).
+# Port hôte 3020 (3000 = team-lol-stats, 3010 = palato-scoring).
+# ═══════════════════════════════════════════════════════════════
+services:
+  app:
+    image: ghcr.io/nicolasmarcinkowski/alert-desk:latest
+    container_name: alert-desk-app
+    restart: unless-stopped
+    ports:
+      - "3020:3000"
+    env_file:
+      - .env
+    environment:
+      - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      - NODE_ENV=production
+      - TZ=UTC
+    depends_on:
+      db:
+        condition: service_healthy
+
+  db:
+    image: postgres:18-alpine
+    container_name: alert-desk-db
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - ./data/postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5

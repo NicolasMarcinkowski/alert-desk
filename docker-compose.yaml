@@ -1,0 +1,25 @@
+# ═══════════════════════════════════════════════════════════════
+# Dev uniquement : base Postgres locale (l'app tourne via `yarn dev`)
+# ═══════════════════════════════════════════════════════════════
+services:
+  db:
+    image: postgres:18-alpine
+    container_name: alert-desk-db-dev
+    restart: unless-stopped
+    ports:
+      # 5433 côté hôte : 5432 est pris par la DB dev de team-lol-stats
+      - "5433:5432"
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: alert_desk
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d alert_desk"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  pgdata:

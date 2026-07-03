@@ -1,0 +1,674 @@
+// Prisma Schema — Alert Desk
+// Architecture médaillon sur 3 schémas Postgres :
+//   - flex_raw : bronze — relevés Flex XML bruts, rejouables
+//   - trading  : silver/gold — exécutions, positions, snapshots normalisés
+//   - app      : auth, config utilisateur, watchlists, alertes, logs de sync
+//
+// Règles transverses :
+//   - montants/prix/quantités en Decimal, jamais Float
+//   - conid IBKR stocké en String (clé canonique des instruments)
+//   - secrets (token Flex, config notification) chiffrés AES-256-GCM applicativement
+
+generator client {
+  provider        = "prisma-client"
+  output          = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+  schemas  = ["flex_raw", "trading", "app"]
+}
+
+// =============================================================================
+// SCHEMA: app — Auth.js (tables standard de l'adapter)
+// =============================================================================
+
+model User {
+  id            String    @id @default(uuid())
+  name          String?
+  email         String?   @unique
+  emailVerified DateTime? @map("email_verified")
+  image         String?
+  createdAt     DateTime  @default(now()) @map("created_at")
+
+  accounts             Account[]
+  sessions             Session[]
+  ibkrAccounts         IbkrAccount[]
+  watchlists           Watchlist[]
+  alertRules           AlertRule[]
+  notificationChannels NotificationChannel[]
+
+  @@map("users")
+  @@schema("app")
+}
+
+model Account {
+  id                String  @id @default(uuid())
+  userId            String  @map("user_id")
+  type              String
+  provider          String
+  providerAccountId String  @map("provider_account_id")
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@map("accounts")
+  @@schema("app")
+}
+
+model Session {
+  id           String   @id @default(uuid())
+  sessionToken String   @unique @map("session_token")
+  userId       String   @map("user_id")
+  expires      DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("sessions")
+  @@schema("app")
+}
+
+model VerificationToken {
+  identifier String
+  token      String
+  expires    DateTime
+
+  @@unique([identifier, token])
+  @@map("verification_tokens")
+  @@schema("app")
+}
+
+// =============================================================================
+// SCHEMA: app — Lien IBKR & synchronisation
+// =============================================================================
+
+model IbkrAccount {
+  id                 String            @id @default(uuid())
+  userId             String            @map("user_id")
+  label              String
+  /// "U1234567" — appris au premier import Flex
+  ibkrAccountId      String?           @unique @map("ibkr_account_id")
+  baseCurrency       String            @default("EUR") @map("base_currency")
+  /// Token Flex Web Service, chiffré (crypto/seal)
+  flexTokenEncrypted String            @map("flex_token_encrypted")
+  status             IbkrAccountStatus @default(ACTIVE)
+  createdAt          DateTime          @default(now()) @map("created_at")
+  updatedAt          DateTime          @updatedAt @map("updated_at")
+
+  user              User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  flexQueries       FlexQuery[]
+  syncRuns          SyncRun[]
+  executions        Execution[]
+  roundTrips        RoundTrip[]
+  positions         Position[]
+  positionSnapshots PositionSnapshot[]
+  accountSnapshots  AccountSnapshot[]
+  cashBalances      CashBalance[]
+  cashTransactions  CashTransaction[]
+  corporateActions  CorporateAction[]
+  alertRules        AlertRule[]
+
+  @@index([userId])
+  @@map("ibkr_accounts")
+  @@schema("app")
+}
+
+model FlexQuery {
+  id            String        @id @default(uuid())
+  ibkrAccountId String        @map("ibkr_account_id")
+  /// Flex Query ID côté IBKR (non secret)
+  queryId       String        @map("query_id")
+  type          FlexQueryType
+  enabled       Boolean       @default(true)
+  lastRunAt     DateTime?     @map("last_run_at")
+  lastSuccessAt DateTime?     @map("last_success_at")
+
+  account IbkrAccount @relation(fields: [ibkrAccountId], references: [id], onDelete: Cascade)
+
+  @@unique([ibkrAccountId, queryId])
+  @@map("flex_queries")
+  @@schema("app")
+}
+
+model SyncRun {
+  id            String      @id @default(uuid())
+  /// null = run global (tous comptes)
+  ibkrAccountId String?     @map("ibkr_account_id")
+  kind          SyncKind
+  trigger       SyncTrigger
+  status        SyncStatus  @default(RUNNING)
+  startedAt     DateTime    @default(now()) @map("started_at")
+  finishedAt    DateTime?   @map("finished_at")
+  itemsFetched  Int         @default(0) @map("items_fetched")
+  itemsInserted Int         @default(0) @map("items_inserted")
+  itemsUpdated  Int         @default(0) @map("items_updated")
+  duplicates    Int         @default(0)
+  errors        String?
+
+  account IbkrAccount? @relation(fields: [ibkrAccountId], references: [id], onDelete: SetNull)
+
+  @@index([startedAt])
+  @@index([status])
+  @@index([ibkrAccountId, kind, startedAt])
+  @@map("sync_runs")
+  @@schema("app")
+}
+
+// =============================================================================
+// SCHEMA: app — Watchlists, alertes, notifications
+// =============================================================================
+
+model Watchlist {
+  id        String @id @default(uuid())
+  userId    String @map("user_id")
+  name      String
+  sortOrder Int    @default(0) @map("sort_order")
+
+  user  User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  items WatchlistItem[]
+
+  @@unique([userId, name])
+  @@map("watchlists")
+  @@schema("app")
+}
+
+/// Les items portent un symbole libre (provider-agnostique) ;
+/// Instrument reste strictement issu des imports IBKR (lié si tradé).
+model WatchlistItem {
+  id           String  @id @default(uuid())
+  watchlistId  String  @map("watchlist_id")
+  symbol       String
+  instrumentId String? @map("instrument_id")
+  sortOrder    Int     @default(0) @map("sort_order")
+
+  watchlist  Watchlist   @relation(fields: [watchlistId], references: [id], onDelete: Cascade)
+  instrument Instrument? @relation(fields: [instrumentId], references: [id], onDelete: SetNull)
+
+  @@unique([watchlistId, symbol])
+  @@map("watchlist_items")
+  @@schema("app")
+}
+
+model AlertRule {
+  id              String        @id @default(uuid())
+  userId          String        @map("user_id")
+  type            AlertRuleType
+  /// Pour les règles prix / % jour
+  symbol          String?
+  /// Pour les règles P&L de position
+  ibkrAccountId   String?       @map("ibkr_account_id")
+  instrumentId    String?       @map("instrument_id")
+  /// Prix, %, ou montant P&L (devise de base) selon le type
+  threshold       Decimal       @db.Decimal(18, 6)
+  state           AlertState    @default(ARMED)
+  rearmMode       RearmMode     @default(AUTO_ON_RECROSS)
+  cooldownSeconds Int           @default(900) @map("cooldown_seconds")
+  rearmAt         DateTime?     @map("rearm_at")
+  lastTriggeredAt DateTime?     @map("last_triggered_at")
+  lastValue       Decimal?      @map("last_value") @db.Decimal(18, 6)
+  notifyTelegram  Boolean       @default(true) @map("notify_telegram")
+  notifyDiscord   Boolean       @default(false) @map("notify_discord")
+  createdAt       DateTime      @default(now()) @map("created_at")
+
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  ibkrAccount IbkrAccount? @relation(fields: [ibkrAccountId], references: [id], onDelete: Cascade)
+  instrument  Instrument?  @relation(fields: [instrumentId], references: [id], onDelete: Cascade)
+  events      AlertEvent[]
+
+  @@index([userId])
+  @@index([state])
+  @@index([symbol])
+  @@map("alert_rules")
+  @@schema("app")
+}
+
+model AlertEvent {
+  id            String   @id @default(uuid())
+  alertRuleId   String   @map("alert_rule_id")
+  triggeredAt   DateTime @default(now()) @map("triggered_at")
+  observedValue Decimal  @map("observed_value") @db.Decimal(18, 6)
+  message       String
+  /// Résultat de livraison par canal : { telegram: {ok, error?, at}, discord: {...} }
+  deliveries    Json?
+
+  rule AlertRule @relation(fields: [alertRuleId], references: [id], onDelete: Cascade)
+
+  @@index([alertRuleId, triggeredAt])
+  @@index([triggeredAt])
+  @@map("alert_events")
+  @@schema("app")
+}
+
+model NotificationChannel {
+  id              String                  @id @default(uuid())
+  userId          String                  @map("user_id")
+  type            NotificationChannelType
+  /// JSON chiffré : {chatId} (Telegram) ou {webhookUrl} (Discord)
+  configEncrypted String                  @map("config_encrypted")
+  enabled         Boolean                 @default(true)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, type])
+  @@map("notification_channels")
+  @@schema("app")
+}
+
+// =============================================================================
+// SCHEMA: flex_raw — bronze
+// =============================================================================
+
+/// XML Flex complet, persisté AVANT parsing — source de vérité rejouable
+model FlexStatementRaw {
+  id            String    @id @default(uuid())
+  ibkrAccountId String    @map("ibkr_account_id")
+  flexQueryId   String    @map("flex_query_id")
+  referenceCode String    @map("reference_code")
+  payload       String
+  fromDate      DateTime? @map("from_date") @db.Date
+  toDate        DateTime? @map("to_date") @db.Date
+  fetchedAt     DateTime  @default(now()) @map("fetched_at")
+  processedAt   DateTime? @map("processed_at")
+  processedOk   Boolean   @default(false) @map("processed_ok")
+
+  @@index([ibkrAccountId, fetchedAt])
+  @@index([processedOk])
+  @@map("flex_statement_raw")
+  @@schema("flex_raw")
+}
+
+// =============================================================================
+// SCHEMA: trading — instruments & activité
+// =============================================================================
+
+model Instrument {
+  id               String        @id @default(uuid())
+  /// IBKR contract id — clé canonique interne
+  conid            String        @unique
+  /// Symbole local IBKR
+  symbol           String
+  secType          AssetCategory @map("sec_type")
+  description      String?
+  currency         String
+  multiplier       Decimal       @default(1) @db.Decimal(10, 2)
+  // Champs options
+  underlyingConid  String?       @map("underlying_conid")
+  underlyingSymbol String?       @map("underlying_symbol")
+  strike           Decimal?      @db.Decimal(18, 6)
+  expiry           DateTime?     @db.Date
+  putCall          PutCall?      @map("put_call")
+  /// Symbole OCC 21 caractères normalisé (jointure fournisseurs de quotes)
+  occSymbol        String?       @unique @map("occ_symbol")
+  exchange         String?
+  isin             String?
+
+  executions     Execution[]
+  roundTrips     RoundTrip[]
+  positions      Position[]
+  snapshots      PositionSnapshot[]
+  cashTxns       CashTransaction[]
+  corpActions    CorporateAction[]
+  watchlistItems WatchlistItem[]
+  alertRules     AlertRule[]
+
+  @@index([symbol])
+  @@index([underlyingSymbol])
+  @@index([secType, expiry])
+  @@map("instruments")
+  @@schema("trading")
+}
+
+model Execution {
+  id                  String          @id @default(uuid())
+  ibkrAccountId       String          @map("ibkr_account_id")
+  instrumentId        String          @map("instrument_id")
+  /// ibExecID > transactionID > sha256 stable (champs volatils exclus)
+  dedupeKey           String          @map("dedupe_key")
+  ibExecId            String?         @map("ib_exec_id")
+  ibOrderId           String?         @map("ib_order_id")
+  transactionId       String?         @map("transaction_id")
+  side                OrderSide
+  /// Toujours positive ; le sens est porté par side
+  quantity            Decimal         @db.Decimal(18, 4)
+  price               Decimal         @db.Decimal(18, 6)
+  /// Devise native
+  proceeds            Decimal         @db.Decimal(18, 4)
+  commission          Decimal         @db.Decimal(18, 4)
+  commissionCurrency  String          @map("commission_currency")
+  currency            String
+  fxRateToBase        Decimal         @map("fx_rate_to_base") @db.Decimal(18, 8)
+  tradeDate           DateTime        @map("trade_date") @db.Date
+  /// timestamptz UTC (converti au parsing depuis le fuseau du compte)
+  tradeTime           DateTime        @map("trade_time")
+  settleDate          DateTime?       @map("settle_date") @db.Date
+  /// Codes IBKR "O", "C", "O;C"
+  openCloseCode       String?         @map("open_close_code")
+  /// "A"=assignment, "Ep"=expired, "Ex"=exercised…
+  ibkrCodes           String?         @map("ibkr_codes")
+  /// Fourni par Activity Flex uniquement — source de vérité du P&L réalisé
+  fifoPnlRealized     Decimal?        @map("fifo_pnl_realized") @db.Decimal(18, 4)
+  source              ExecutionSource @default(TRADE_CONFIRMS)
+  confirmedByActivity Boolean         @default(false) @map("confirmed_by_activity")
+  roundTripId         String?         @map("round_trip_id")
+  createdAt           DateTime        @default(now()) @map("created_at")
+
+  account    IbkrAccount @relation(fields: [ibkrAccountId], references: [id], onDelete: Cascade)
+  instrument Instrument  @relation(fields: [instrumentId], references: [id])
+  roundTrip  RoundTrip?  @relation(fields: [roundTripId], references: [id], onDelete: SetNull)
+
+  @@unique([ibkrAccountId, dedupeKey])
+  @@index([ibkrAccountId, tradeDate])
+  @@index([ibkrAccountId, instrumentId, tradeTime])
+  @@index([roundTripId])
+  @@map("executions")
+  @@schema("trading")
+}
+
+/// Cycle flat-to-flat par instrument. Les champs journal (strategy/tags/notes/rating)
+/// appartiennent à l'utilisateur : rebuild par UPSERT sur clé naturelle uniquement,
+/// jamais de delete-and-recreate.
+model RoundTrip {
+  id               String          @id @default(uuid())
+  ibkrAccountId    String          @map("ibkr_account_id")
+  instrumentId     String          @map("instrument_id")
+  /// dedupeKey du premier fill = identité stable
+  openExecutionKey String          @map("open_execution_key")
+  status           RoundTripStatus @default(OPEN)
+  direction        TradeDirection
+  openedAt         DateTime        @map("opened_at")
+  closedAt         DateTime?       @map("closed_at")
+  maxQuantity      Decimal         @map("max_quantity") @db.Decimal(18, 4)
+  /// Devise native — somme des fifoPnlRealized
+  realizedPnl      Decimal?        @map("realized_pnl") @db.Decimal(18, 4)
+  realizedPnlBase  Decimal?        @map("realized_pnl_base") @db.Decimal(18, 4)
+  commissions      Decimal         @default(0) @db.Decimal(18, 4)
+  /// true quand toutes les clôtures sont confirmées par Activity
+  pnlConfirmed     Boolean         @default(false) @map("pnl_confirmed")
+  // --- journal (saisie utilisateur, préservée au rebuild) ---
+  strategy         String?
+  tags             String[]        @default([])
+  notes            String?
+  rating           Int?
+
+  account    IbkrAccount @relation(fields: [ibkrAccountId], references: [id], onDelete: Cascade)
+  instrument Instrument  @relation(fields: [instrumentId], references: [id])
+  executions Execution[]
+
+  @@unique([ibkrAccountId, openExecutionKey])
+  @@index([ibkrAccountId, status])
+  @@index([instrumentId])
+  @@index([closedAt])
+  @@map("round_trips")
+  @@schema("trading")
+}
+
+/// Position courante réconciliée (matérialisée à chaque sync)
+model Position {
+  id            String        @id @default(uuid())
+  ibkrAccountId String        @map("ibkr_account_id")
+  instrumentId  String        @map("instrument_id")
+  /// Signée (négatif = short)
+  quantity      Decimal       @db.Decimal(18, 4)
+  avgCost       Decimal       @map("avg_cost") @db.Decimal(18, 6)
+  currency      String
+  fxRateToBase  Decimal       @map("fx_rate_to_base") @db.Decimal(18, 8)
+  state         PositionState @default(SNAPSHOT_CONFIRMED)
+  snapshotDate  DateTime?     @map("snapshot_date") @db.Date
+  driftDetected Boolean       @default(false) @map("drift_detected")
+  updatedAt     DateTime      @updatedAt @map("updated_at")
+
+  account    IbkrAccount @relation(fields: [ibkrAccountId], references: [id], onDelete: Cascade)
+  instrument Instrument  @relation(fields: [instrumentId], references: [id])
+
+  @@unique([ibkrAccountId, instrumentId])
+  @@map("positions")
+  @@schema("trading")
+}
+
+/// Snapshot quotidien autoritaire des positions ouvertes (Activity Flex OpenPositions)
+model PositionSnapshot {
+  id             String   @id @default(uuid())
+  ibkrAccountId  String   @map("ibkr_account_id")
+  instrumentId   String   @map("instrument_id")
+  date           DateTime @db.Date
+  quantity       Decimal  @db.Decimal(18, 4)
+  markPrice      Decimal  @map("mark_price") @db.Decimal(18, 6)
+  costBasisPrice Decimal  @map("cost_basis_price") @db.Decimal(18, 6)
+  positionValue  Decimal  @map("position_value") @db.Decimal(18, 4)
+  unrealizedPnl  Decimal  @map("unrealized_pnl") @db.Decimal(18, 4)
+  currency       String
+  fxRateToBase   Decimal  @map("fx_rate_to_base") @db.Decimal(18, 8)
+
+  account    IbkrAccount @relation(fields: [ibkrAccountId], references: [id], onDelete: Cascade)
+  instrument Instrument  @relation(fields: [instrumentId], references: [id])
+
+  @@unique([ibkrAccountId, date, instrumentId])
+  @@index([ibkrAccountId, date])
+  @@map("position_snapshots")
+  @@schema("trading")
+}
+
+/// Snapshot quotidien NAV/equity (Activity Flex EquitySummaryInBase / ChangeInNAV)
+model AccountSnapshot {
+  id                  String   @id @default(uuid())
+  ibkrAccountId       String   @map("ibkr_account_id")
+  date                DateTime @db.Date
+  /// Devise de base
+  nav                 Decimal  @db.Decimal(18, 4)
+  cash                Decimal  @db.Decimal(18, 4)
+  stockValue          Decimal  @map("stock_value") @db.Decimal(18, 4)
+  optionValue         Decimal  @map("option_value") @db.Decimal(18, 4)
+  /// Pour corriger la courbe d'equity (drawdown sur série ajustée)
+  depositsWithdrawals Decimal  @default(0) @map("deposits_withdrawals") @db.Decimal(18, 4)
+  fees                Decimal  @default(0) @db.Decimal(18, 4)
+  baseCurrency        String   @map("base_currency")
+
+  account IbkrAccount @relation(fields: [ibkrAccountId], references: [id], onDelete: Cascade)
+
+  @@unique([ibkrAccountId, date])
+  @@map("account_snapshots")
+  @@schema("trading")
+}
+
+/// Solde de cash par devise et par jour (Activity Flex CashReport)
+model CashBalance {
+  id            String   @id @default(uuid())
+  ibkrAccountId String   @map("ibkr_account_id")
+  date          DateTime @db.Date
+  currency      String
+  amount        Decimal  @db.Decimal(18, 4)
+  fxRateToBase  Decimal  @map("fx_rate_to_base") @db.Decimal(18, 8)
+
+  account IbkrAccount @relation(fields: [ibkrAccountId], references: [id], onDelete: Cascade)
+
+  @@unique([ibkrAccountId, date, currency])
+  @@map("cash_balances")
+  @@schema("trading")
+}
+
+/// Dividendes, retenues, intérêts, frais, dépôts/retraits
+model CashTransaction {
+  id            String              @id @default(uuid())
+  ibkrAccountId String              @map("ibkr_account_id")
+  instrumentId  String?             @map("instrument_id")
+  type          CashTransactionType
+  amount        Decimal             @db.Decimal(18, 4)
+  currency      String
+  fxRateToBase  Decimal             @map("fx_rate_to_base") @db.Decimal(18, 8)
+  dateTime      DateTime            @map("date_time")
+  description   String?
+  transactionId String              @map("transaction_id")
+
+  account    IbkrAccount @relation(fields: [ibkrAccountId], references: [id], onDelete: Cascade)
+  instrument Instrument? @relation(fields: [instrumentId], references: [id], onDelete: SetNull)
+
+  @@unique([ibkrAccountId, transactionId])
+  @@index([ibkrAccountId, dateTime])
+  @@map("cash_transactions")
+  @@schema("trading")
+}
+
+model CorporateAction {
+  id            String    @id @default(uuid())
+  ibkrAccountId String    @map("ibkr_account_id")
+  instrumentId  String?   @map("instrument_id")
+  ibkrType      String    @map("ibkr_type")
+  description   String?
+  reportDate    DateTime? @map("report_date") @db.Date
+  quantity      Decimal?  @db.Decimal(18, 4)
+  value         Decimal?  @db.Decimal(18, 4)
+  transactionId String    @map("transaction_id")
+
+  account    IbkrAccount @relation(fields: [ibkrAccountId], references: [id], onDelete: Cascade)
+  instrument Instrument? @relation(fields: [instrumentId], references: [id], onDelete: SetNull)
+
+  @@unique([ibkrAccountId, transactionId])
+  @@map("corporate_actions")
+  @@schema("trading")
+}
+
+// =============================================================================
+// ENUMS
+// =============================================================================
+
+enum AssetCategory {
+  STK
+  OPT
+  CASH
+  OTHER
+
+  @@schema("trading")
+}
+
+enum PutCall {
+  PUT
+  CALL
+
+  @@schema("trading")
+}
+
+enum OrderSide {
+  BUY
+  SELL
+
+  @@schema("trading")
+}
+
+enum ExecutionSource {
+  TRADE_CONFIRMS
+  ACTIVITY
+
+  @@schema("trading")
+}
+
+enum RoundTripStatus {
+  OPEN
+  CLOSED
+
+  @@schema("trading")
+}
+
+enum TradeDirection {
+  LONG
+  SHORT
+
+  @@schema("trading")
+}
+
+enum PositionState {
+  SNAPSHOT_CONFIRMED
+  INTRADAY_ESTIMATED
+
+  @@schema("trading")
+}
+
+enum CashTransactionType {
+  DIVIDEND
+  WITHHOLDING_TAX
+  INTEREST
+  BROKER_FEE
+  DEPOSIT_WITHDRAWAL
+  OTHER
+
+  @@schema("trading")
+}
+
+enum FlexQueryType {
+  TRADE_CONFIRMS
+  ACTIVITY
+
+  @@schema("app")
+}
+
+enum SyncKind {
+  TRADE_CONFIRMS
+  ACTIVITY
+  RECONCILE
+
+  @@schema("app")
+}
+
+enum SyncTrigger {
+  CRON
+  MANUAL
+
+  @@schema("app")
+}
+
+enum SyncStatus {
+  RUNNING
+  SUCCESS
+  PARTIAL
+  ERROR
+
+  @@schema("app")
+}
+
+enum IbkrAccountStatus {
+  ACTIVE
+  AUTH_ERROR
+  DISABLED
+
+  @@schema("app")
+}
+
+enum NotificationChannelType {
+  TELEGRAM
+  DISCORD
+
+  @@schema("app")
+}
+
+enum AlertRuleType {
+  PRICE_ABOVE
+  PRICE_BELOW
+  PCT_CHANGE_DAY
+  POSITION_PNL_ABOVE
+  POSITION_PNL_BELOW
+
+  @@schema("app")
+}
+
+enum AlertState {
+  ARMED
+  TRIGGERED
+  COOLDOWN
+  DISABLED
+
+  @@schema("app")
+}
+
+enum RearmMode {
+  MANUAL
+  AUTO_ON_RECROSS
+  AUTO_AFTER_COOLDOWN
+
+  @@schema("app")
+}

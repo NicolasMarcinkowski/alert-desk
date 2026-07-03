@@ -1,0 +1,67 @@
+@import "tailwindcss";
+
+/*
+ * Design tokens Alert Desk — direction artistique de la maquette v2
+ * (projet Claude Design « Alert Trading Desk »).
+ *
+ * Règles :
+ *  - vert/rouge STRICTEMENT réservés au P&L et aux variations
+ *  - toute valeur financière en mono tabulaire (font-mono + tabular-nums)
+ *  - ambre = valeurs estimées / non confirmées par IBKR
+ */
+
+@theme {
+  --color-bg: #0b0e14;
+  --color-surface: #10151f;
+  --color-surface-2: #151c29;
+  --color-edge: #1c2536;
+  --color-edge-soft: #16202f;
+
+  --color-ink: #dfe8f0;
+  --color-ink-soft: #8fa3b8;
+  --color-ink-mute: #56687d;
+
+  --color-accent: #58a6ff;
+  --color-gain: #22c55e;
+  --color-loss: #ef4444;
+  --color-warn: #f59e0b;
+
+  --font-sans: var(--font-plex-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-plex-mono), ui-monospace, "SF Mono", monospace;
+}
+
+html,
+body {
+  background: var(--color-bg);
+  color: var(--color-ink);
+  -webkit-font-smoothing: antialiased;
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-edge);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #263d58;
+}
+
+input::placeholder {
+  color: var(--color-ink-mute);
+}
+
+@keyframes pulse-dot {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.25;
+  }
+}

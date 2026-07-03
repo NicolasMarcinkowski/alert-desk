@@ -1,0 +1,11 @@
+node_modules
+.next
+.git
+.github
+.env
+.env.local
+.env.*.local
+src/generated
+*.md
+docker-compose*.yaml
+data
