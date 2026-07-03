@@ -137,7 +137,7 @@ export default async function DashboardPage() {
         </Card>
       </div>
 
-      <div className="mt-4">
+      <div className="mt-4 grid gap-4 lg:grid-cols-2">
         <Card
           title="Dernières exécutions IBKR"
           subtitle="Importées via Flex (Trade Confirms ~10 min après le fill)"
@@ -171,6 +171,28 @@ export default async function DashboardPage() {
                   <span className="text-xs text-ink-mute">
                     {formatDateTime(e.tradeTime)} · frais{" "}
                     {formatMoney(e.commission, e.currency)}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Card>
+
+        <Card title="Alertes récentes" subtitle="Derniers déclenchements">
+          {data.recentAlerts.length === 0 ? (
+            <p className="py-8 text-center text-sm text-ink-mute">
+              Aucune alerte déclenchée pour l&apos;instant.
+            </p>
+          ) : (
+            <ul className="divide-y divide-edge-soft">
+              {data.recentAlerts.map((a) => (
+                <li
+                  key={a.id}
+                  className="flex items-center justify-between py-2 text-sm"
+                >
+                  <span>{a.message.replace(/^ALERT DESK — /, "")}</span>
+                  <span className="shrink-0 pl-3 text-xs text-ink-mute">
+                    {formatDateTime(a.triggeredAt)}
                   </span>
                 </li>
               ))}

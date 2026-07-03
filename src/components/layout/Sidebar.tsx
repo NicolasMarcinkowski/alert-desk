@@ -88,7 +88,15 @@ const ANALYSE: NavItem[] = [
   },
 ];
 
-function NavLink({ item, active }: { item: NavItem; active: boolean }) {
+function NavLink({
+  item,
+  active,
+  badge,
+}: {
+  item: NavItem;
+  active: boolean;
+  badge?: number;
+}) {
   return (
     <Link
       href={item.href}
@@ -100,6 +108,11 @@ function NavLink({ item, active }: { item: NavItem; active: boolean }) {
     >
       {item.icon}
       {item.label}
+      {badge !== undefined && badge > 0 && (
+        <span className="ml-auto rounded-full bg-accent/15 px-1.5 py-px font-mono text-[10px] font-semibold tabular-nums text-accent">
+          {badge}
+        </span>
+      )}
     </Link>
   );
 }
@@ -108,10 +121,12 @@ function NavGroup({
   title,
   items,
   pathname,
+  badges,
 }: {
   title: string;
   items: NavItem[];
   pathname: string;
+  badges?: Record<string, number>;
 }) {
   return (
     <div className="flex flex-col gap-0.5">
@@ -122,6 +137,7 @@ function NavGroup({
         <NavLink
           key={item.href}
           item={item}
+          badge={badges?.[item.href]}
           active={
             item.href === "/"
               ? pathname === "/"
@@ -133,7 +149,7 @@ function NavGroup({
   );
 }
 
-export function Sidebar() {
+export function Sidebar({ alertCount = 0 }: { alertCount?: number }) {
   const pathname = usePathname();
 
   return (
@@ -147,7 +163,12 @@ export function Sidebar() {
       </div>
 
       <nav className="mt-2 flex flex-1 flex-col">
-        <NavGroup title="Surveillance" items={SURVEILLANCE} pathname={pathname} />
+        <NavGroup
+          title="Surveillance"
+          items={SURVEILLANCE}
+          pathname={pathname}
+          badges={{ "/alertes": alertCount }}
+        />
         <NavGroup title="Analyse" items={ANALYSE} pathname={pathname} />
         <div className="mt-auto">
           <NavLink

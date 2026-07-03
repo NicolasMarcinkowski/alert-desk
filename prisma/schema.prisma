@@ -208,7 +208,7 @@ model AlertRule {
   /// Prix, %, ou montant P&L (devise de base) selon le type
   threshold       Decimal       @db.Decimal(18, 6)
   state           AlertState    @default(ARMED)
-  rearmMode       RearmMode     @default(AUTO_ON_RECROSS)
+  rearmMode       RearmMode     @default(AUTO_ON_RECROSS) @map("rearm_mode")
   cooldownSeconds Int           @default(900) @map("cooldown_seconds")
   rearmAt         DateTime?     @map("rearm_at")
   lastTriggeredAt DateTime?     @map("last_triggered_at")

@@ -11,6 +11,14 @@ import { prisma } from "@/lib/db/client";
 import { quoteCache } from "@/lib/marketdata/quote-cache";
 import { fetchQuote, getFinnhub, getProvider } from "@/lib/marketdata/registry";
 import { cacheKey, type Quote, type SymbolRef } from "@/lib/marketdata/types";
+import { formatOptionName } from "@/lib/utils/format";
+import {
+  alertSymbols,
+  evaluateQuote,
+  evaluatorStatus,
+  loadAlertRules,
+  type EvaluatorPosition,
+} from "./alert-evaluator";
 import { sseHub } from "./sse-hub";
 
 const REFRESH_SUBSCRIPTIONS_MS = 60_000;
@@ -56,25 +64,36 @@ function onQuote(quote: Quote): void {
   quoteCache.set(quote);
 }
 
-/** positions ouvertes ∪ watchlists → refs de souscription dédupliquées. */
-async function collectSubscriptions(): Promise<SymbolRef[]> {
-  const [positions, watchlistItems] = await Promise.all([
+/** positions ∪ alertes ∪ watchlists → refs dédupliquées + positions pour l'évaluateur. */
+async function collectSubscriptions(): Promise<{
+  refs: SymbolRef[];
+  evaluatorPositions: EvaluatorPosition[];
+}> {
+  const [positions, watchlistItems, ruleSymbols] = await Promise.all([
     prisma.position.findMany({
       include: {
         instrument: {
           select: {
+            id: true,
             symbol: true,
             secType: true,
             occSymbol: true,
             currency: true,
+            multiplier: true,
+            underlyingSymbol: true,
+            expiry: true,
+            strike: true,
+            putCall: true,
           },
         },
       },
     }),
     prisma.watchlistItem.findMany({ select: { symbol: true } }),
+    alertSymbols(),
   ]);
 
   const refs = new Map<string, SymbolRef>();
+  const evaluatorPositions: EvaluatorPosition[] = [];
 
   // Priorité 1 : positions (d'abord dans la liste → slots websocket)
   for (const p of positions) {
@@ -89,21 +108,37 @@ async function collectSubscriptions(): Promise<SymbolRef[]> {
           }
         : { kind: "STK", symbol: instr.symbol, currency: instr.currency };
     refs.set(cacheKey(ref), ref);
+    evaluatorPositions.push({
+      key: cacheKey(ref),
+      instrumentId: instr.id,
+      quantity: Number(p.quantity),
+      avgCost: Number(p.avgCost),
+      multiplier: Number(instr.multiplier),
+      fxRateToBase: Number(p.fxRateToBase),
+      displayLabel:
+        instr.secType === "OPT" ? formatOptionName(instr) : instr.symbol,
+    });
   }
-  // Priorité 2 : watchlists (actions par ticker)
+  // Priorité 2 : symboles des règles d'alerte de prix
+  for (const symbol of ruleSymbols) {
+    const ref: SymbolRef = { kind: "STK", symbol };
+    if (!refs.has(cacheKey(ref))) refs.set(cacheKey(ref), ref);
+  }
+  // Priorité 3 : watchlists (actions par ticker)
   for (const item of watchlistItems) {
     const ref: SymbolRef = { kind: "STK", symbol: item.symbol };
     if (!refs.has(cacheKey(ref))) refs.set(cacheKey(ref), ref);
   }
 
-  return Array.from(refs.values());
+  return { refs: Array.from(refs.values()), evaluatorPositions };
 }
 
 async function refreshSubscriptions(): Promise<void> {
   const s = state();
   try {
-    const subs = await collectSubscriptions();
+    const { refs: subs, evaluatorPositions } = await collectSubscriptions();
     s.subscriptions = subs;
+    await loadAlertRules(evaluatorPositions);
 
     const finnhub = getFinnhub();
     const wsCandidates = finnhub
@@ -149,9 +184,12 @@ export function startEngine(): void {
   s.started = true;
   s.startedAt = Date.now();
 
-  // Fan-out SSE branché une seule fois sur le cache
+  // Fan-out SSE + évaluateur d'alertes, branchés une seule fois sur le cache
   quoteCache.removeAllListeners("quote");
-  quoteCache.on("quote", (q: Quote) => sseHub.broadcast("quote", q));
+  quoteCache.on("quote", (q: Quote) => {
+    sseHub.broadcast("quote", q);
+    evaluateQuote(q);
+  });
 
   void refreshSubscriptions().then(() => pollOnce());
   s.refreshTimer = setInterval(() => void refreshSubscriptions(), REFRESH_SUBSCRIPTIONS_MS);
@@ -179,5 +217,6 @@ export function engineStatus() {
     lastTickAt: s.lastTickAt,
     lastError: s.lastError,
     finnhubConfigured: getFinnhub() !== null,
+    alerts: evaluatorStatus(),
   };
 }

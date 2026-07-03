@@ -49,5 +49,5 @@ Dans Client Portal IBKR → *Performance & Reports* → *Flex Queries* :
 - **M0** ✅ Socle : auth Google + allowlist, layout, Docker/CI-CD.
 - **M1** ✅ Import IBKR (Flex), positions & journal.
 - **M2** ✅ Données de marché live (Finnhub + SSE), P&L latent, watchlist.
-- **M3** Alertes + notifications Telegram/Discord.
+- **M3** ✅ Alertes + notifications Telegram/Discord.
 - **M4** Analytics, détail de trade (notes/tags/stratégie), mobile.

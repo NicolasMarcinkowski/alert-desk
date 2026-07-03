@@ -308,6 +308,11 @@ export interface DashboardData {
     tradeTime: Date;
     commission: number;
   }[];
+  recentAlerts: {
+    id: string;
+    message: string;
+    triggeredAt: Date;
+  }[];
   hasAccounts: boolean;
 }
 
@@ -416,6 +421,13 @@ export async function getDashboard(userId: string): Promise<DashboardData> {
     include: { instrument: { select: { symbol: true } } },
   });
 
+  const recentAlerts = await prisma.alertEvent.findMany({
+    where: { rule: { userId } },
+    orderBy: { triggeredAt: "desc" },
+    take: 5,
+    select: { id: true, message: true, triggeredAt: true },
+  });
+
   const { daysToExpiry, formatOptionName } = await import(
     "@/lib/utils/format"
   );
@@ -455,6 +467,7 @@ export async function getDashboard(userId: string): Promise<DashboardData> {
       tradeTime: e.tradeTime,
       commission: Math.abs(Number(e.commission)),
     })),
+    recentAlerts,
     hasAccounts: accountIds.length > 0,
   };
 }
