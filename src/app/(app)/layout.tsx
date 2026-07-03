@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db/client";
 import { Sidebar } from "@/components/layout/Sidebar";
+import { MobileNav } from "@/components/layout/MobileNav";
 import { Header } from "@/components/layout/Header";
 
 export default async function AppLayout({
@@ -23,8 +24,11 @@ export default async function AppLayout({
       <Sidebar alertCount={alertCount} />
       <div className="flex min-w-0 flex-1 flex-col">
         <Header user={session.user} />
-        <main className="min-w-0 flex-1 p-6">{children}</main>
+        <main className="min-w-0 flex-1 p-4 pb-24 lg:p-6 lg:pb-6">
+          {children}
+        </main>
       </div>
+      <MobileNav alertCount={alertCount} />
     </div>
   );
 }

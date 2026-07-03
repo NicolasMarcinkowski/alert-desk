@@ -4,12 +4,10 @@ import { PageTitle } from "@/components/ui/PagePlaceholder";
 import { Card } from "@/components/ui/Card";
 import { KpiTile } from "@/components/ui/KpiTile";
 import {
-  formatDate,
-  formatMoney,
-  formatPct,
-  formatQty,
-  formatSignedMoney,
-} from "@/lib/utils/format";
+  JournalTable,
+  type JournalTripView,
+} from "@/components/journal/JournalTable";
+import { formatMoney, formatPct, formatSignedMoney } from "@/lib/utils/format";
 
 export const dynamic = "force-dynamic";
 
@@ -19,20 +17,37 @@ export default async function JournalPage() {
   const winRate =
     kpis.closedCount > 0 ? (kpis.winCount / kpis.closedCount) * 100 : null;
 
+  const tripViews: JournalTripView[] = trips.map((t) => ({
+    id: t.id,
+    symbol: t.symbol,
+    optionLabel: t.optionLabel,
+    secType: t.secType,
+    direction: t.direction,
+    status: t.status,
+    openedAt: t.openedAt.toISOString(),
+    closedAt: t.closedAt?.toISOString() ?? null,
+    maxQuantity: t.maxQuantity,
+    realizedPnl: t.realizedPnl,
+    currency: t.currency,
+    commissions: t.commissions,
+    pnlConfirmed: t.pnlConfirmed,
+    strategy: t.strategy,
+    tags: t.tags,
+    rating: t.rating,
+  }));
+
   return (
     <div>
       <PageTitle
         title="Journal de trades"
-        subtitle="Round-trips reconstruits depuis les exécutions IBKR · P&L réalisé fifoPnlRealized"
+        subtitle="Round-trips reconstruits depuis les exécutions IBKR — clique sur un trade pour le détail et les annotations"
       />
 
       <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
         <KpiTile
           label="P&L net réalisé"
           value={
-            kpis.closedCount > 0
-              ? formatSignedMoney(kpis.netRealizedBase)
-              : "—"
+            kpis.closedCount > 0 ? formatSignedMoney(kpis.netRealizedBase) : "—"
           }
           sub="net de commissions, devise de base"
           tone={
@@ -68,98 +83,7 @@ export default async function JournalPage() {
           </p>
         </Card>
       ) : (
-        <Card className="overflow-hidden" title="Round-trips">
-          <div className="-m-5 overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-edge text-left text-[11px] uppercase tracking-wider text-ink-mute">
-                  <th className="px-5 py-2.5 font-medium">Instrument</th>
-                  <th className="px-3 py-2.5 font-medium">Sens</th>
-                  <th className="px-3 py-2.5 text-right font-medium">Qté max</th>
-                  <th className="px-3 py-2.5 font-medium">Ouvert</th>
-                  <th className="px-3 py-2.5 font-medium">Clôturé</th>
-                  <th className="px-3 py-2.5 text-right font-medium">P&L réalisé</th>
-                  <th className="px-3 py-2.5 text-right font-medium">Frais</th>
-                  <th className="px-5 py-2.5 text-right font-medium">Résultat</th>
-                </tr>
-              </thead>
-              <tbody>
-                {trips.map((trip) => (
-                  <tr key={trip.id} className="border-b border-edge-soft last:border-0">
-                    <td className="px-5 py-2">
-                      {trip.optionLabel ? (
-                        <span className="font-mono text-[13px]">
-                          {trip.optionLabel}
-                        </span>
-                      ) : (
-                        trip.symbol
-                      )}
-                      <span className="ml-2 rounded border border-edge px-1 py-px text-[9px] text-ink-mute">
-                        {trip.secType}
-                      </span>
-                      {trip.strategy && (
-                        <span className="ml-2 rounded bg-accent/10 px-1.5 py-px text-[10px] text-accent">
-                          {trip.strategy}
-                        </span>
-                      )}
-                    </td>
-                    <td className="px-3 py-2 text-xs text-ink-soft">
-                      {trip.direction === "LONG" ? "Long" : "Short"}
-                    </td>
-                    <td className="px-3 py-2 text-right font-mono tabular-nums">
-                      {formatQty(trip.maxQuantity)}
-                    </td>
-                    <td className="px-3 py-2 text-xs text-ink-soft">
-                      {formatDate(trip.openedAt)}
-                    </td>
-                    <td className="px-3 py-2 text-xs text-ink-soft">
-                      {trip.closedAt ? formatDate(trip.closedAt) : "—"}
-                    </td>
-                    <td className="px-3 py-2 text-right font-mono tabular-nums">
-                      {trip.realizedPnl !== null ? (
-                        <span
-                          className={
-                            trip.realizedPnl >= 0 ? "text-gain" : "text-loss"
-                          }
-                        >
-                          {formatSignedMoney(trip.realizedPnl, trip.currency)}
-                          {!trip.pnlConfirmed && trip.status === "CLOSED" && (
-                            <span
-                              className="ml-1.5 rounded border border-warn/30 bg-warn/10 px-1 py-px text-[9px] font-semibold text-warn"
-                              title="En attente de confirmation par le relevé Activity"
-                            >
-                              ESTIMÉ
-                            </span>
-                          )}
-                        </span>
-                      ) : (
-                        <span className="text-ink-mute">—</span>
-                      )}
-                    </td>
-                    <td className="px-3 py-2 text-right font-mono tabular-nums text-ink-soft">
-                      {formatMoney(trip.commissions, trip.currency)}
-                    </td>
-                    <td className="px-5 py-2 text-right">
-                      {trip.status === "OPEN" ? (
-                        <span className="rounded border border-accent/30 bg-accent/10 px-1.5 py-px text-[9px] font-semibold text-accent">
-                          EN COURS
-                        </span>
-                      ) : (trip.realizedPnl ?? 0) > 0 ? (
-                        <span className="rounded border border-gain/30 bg-gain/10 px-1.5 py-px text-[9px] font-semibold text-gain">
-                          WIN
-                        </span>
-                      ) : (
-                        <span className="rounded border border-loss/30 bg-loss/10 px-1.5 py-px text-[9px] font-semibold text-loss">
-                          LOSS
-                        </span>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </Card>
+        <JournalTable trips={tripViews} />
       )}
     </div>
   );

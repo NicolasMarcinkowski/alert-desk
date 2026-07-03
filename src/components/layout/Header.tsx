@@ -25,7 +25,7 @@ export async function Header({ user }: { user: HeaderUser }) {
 
   return (
     <header className="sticky top-0 z-10 flex h-14 items-center justify-between border-b border-edge bg-bg/90 px-6 backdrop-blur">
-      <div className="flex items-center gap-3 text-sm text-ink-soft">
+      <div className="hidden items-center gap-3 text-sm text-ink-soft md:flex">
         <span suppressHydrationWarning>
           {new Intl.DateTimeFormat("fr-FR", {
             dateStyle: "long",
@@ -67,7 +67,7 @@ export async function Header({ user }: { user: HeaderUser }) {
               {(user.name ?? user.email ?? "?").charAt(0).toUpperCase()}
             </div>
           )}
-          <span className="max-w-40 truncate text-xs text-ink-soft">
+          <span className="hidden max-w-40 truncate text-xs text-ink-soft sm:inline">
             {user.email}
           </span>
           <form

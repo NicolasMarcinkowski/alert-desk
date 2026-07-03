@@ -91,7 +91,68 @@ export function LivePositionsTable({
   );
 
   return (
-    <div className="-m-5 overflow-x-auto">
+    <div className="-m-5">
+      {/* Mobile : cartes par sous-jacent, tap pour déplier */}
+      <div className="flex flex-col gap-2 p-3 lg:hidden">
+        {computed.map((group) => (
+          <details
+            key={group.underlying}
+            className="rounded-xl border border-edge bg-surface-2/40"
+          >
+            <summary className="flex cursor-pointer items-center justify-between px-4 py-3">
+              <span className="font-semibold">
+                {group.underlying}
+                <span className="ml-2 text-xs font-normal text-ink-mute">
+                  {group.rows.length} pos.
+                </span>
+              </span>
+              <span className="font-mono text-sm tabular-nums">
+                <Pnl value={group.totalBase} currency={baseCurrency} />
+              </span>
+            </summary>
+            <div className="flex flex-col gap-2 px-4 pb-3">
+              {group.rows.map((row) => (
+                <div
+                  key={row.id}
+                  className="rounded-lg border border-edge-soft bg-surface px-3 py-2 text-sm"
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="font-mono text-[13px]">{row.display}</span>
+                    {row.freshness && <FreshnessBadge kind={row.freshness} />}
+                  </div>
+                  <div className="mt-1 flex items-center justify-between font-mono text-xs tabular-nums text-ink-soft">
+                    <span>
+                      {formatQty(row.quantity)}
+                      {row.secType === "OPT" && ` ×${row.multiplier}`} · PRU{" "}
+                      {formatPrice(row.avgCost, row.currency)}
+                      {row.dte !== null && (
+                        <span className={row.dte <= 7 ? " text-warn" : ""}>
+                          {" "}
+                          · {row.dte} j
+                        </span>
+                      )}
+                    </span>
+                    <span>
+                      <Pnl value={row.latent} currency={row.currency} />
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </details>
+        ))}
+        <div className="flex items-center justify-between px-4 py-2 text-sm">
+          <span className="text-xs font-semibold uppercase tracking-wider text-ink-mute">
+            Total latent
+          </span>
+          <span className="font-mono font-semibold tabular-nums">
+            <Pnl value={grandTotal} currency={baseCurrency} />
+          </span>
+        </div>
+      </div>
+
+      {/* Desktop : table complète */}
+      <div className="hidden overflow-x-auto lg:block">
       <table className="w-full text-sm">
         <thead>
           <tr className="border-b border-edge text-left text-[11px] uppercase tracking-wider text-ink-mute">
@@ -209,6 +270,7 @@ export function LivePositionsTable({
           </tr>
         </tfoot>
       </table>
+      </div>
     </div>
   );
 }

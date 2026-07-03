@@ -153,7 +153,7 @@ export function Sidebar({ alertCount = 0 }: { alertCount?: number }) {
   const pathname = usePathname();
 
   return (
-    <aside className="sticky top-0 flex h-screen w-56 shrink-0 flex-col border-r border-edge bg-surface px-3 py-4">
+    <aside className="sticky top-0 hidden h-screen w-56 shrink-0 flex-col border-r border-edge bg-surface px-3 py-4 lg:flex">
       <div className="flex items-center gap-2.5 px-2">
         <Logo size={30} />
         <div className="leading-tight">

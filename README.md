@@ -50,4 +50,6 @@ Dans Client Portal IBKR → *Performance & Reports* → *Flex Queries* :
 - **M1** ✅ Import IBKR (Flex), positions & journal.
 - **M2** ✅ Données de marché live (Finnhub + SSE), P&L latent, watchlist.
 - **M3** ✅ Alertes + notifications Telegram/Discord.
-- **M4** Analytics, détail de trade (notes/tags/stratégie), mobile.
+- **M4** ✅ Analytics, détail de trade (notes/tags/stratégie), mobile.
+
+**v1 complète.** Pistes v2 : gateway IBKR live (ib-gateway docker, 2FA hebdo), greeks/IV, groupement multi-legs (spreads), TWR, slippage alerte→entrée, autres brokers en saisie manuelle, PWA.

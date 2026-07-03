@@ -202,6 +202,7 @@ export interface RoundTripRow {
   pnlConfirmed: boolean;
   strategy: string | null;
   tags: string[];
+  rating: number | null;
   executionCount: number;
 }
 
@@ -246,6 +247,7 @@ export async function getJournal(userId: string): Promise<{
     pnlConfirmed: t.pnlConfirmed,
     strategy: t.strategy,
     tags: t.tags,
+    rating: t.rating,
     executionCount: t._count.executions,
   }));
 
