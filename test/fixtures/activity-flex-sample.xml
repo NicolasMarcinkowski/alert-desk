@@ -1,0 +1,32 @@
+<FlexQueryResponse queryName="Activity - Alert Desk" type="AF">
+<FlexStatements count="1">
+<FlexStatement accountId="U7654321" fromDate="20260627" toDate="20260702" period="Last5CalendarDays" whenGenerated="20260703;081502">
+<Trades>
+<Trade accountId="U7654321" symbol="AAPL" description="APPLE INC" conid="265598" assetCategory="STK" currency="USD" fxRateToBase="0.92" multiplier="1" strike="" expiry="" putCall="" underlyingConid="" underlyingSymbol="" listingExchange="NASDAQ" isin="US0378331005" buySell="BUY" quantity="10" tradePrice="190.50" proceeds="-1905" ibCommission="-1.00" ibCommissionCurrency="USD" tradeDate="20260625" dateTime="20260625;103015" settleDateTarget="20260627" openCloseIndicator="O" notes="" fifoPnlRealized="0" ibExecID="0000e0d5.11111111.01.01" ibOrderID="482915001" transactionID="90001"/>
+<Trade accountId="U7654321" symbol="AAPL" description="APPLE INC" conid="265598" assetCategory="STK" currency="USD" fxRateToBase="0.93" multiplier="1" strike="" expiry="" putCall="" underlyingConid="" underlyingSymbol="" listingExchange="NASDAQ" isin="US0378331005" buySell="SELL" quantity="-10" tradePrice="195.20" proceeds="1952" ibCommission="-1.02" ibCommissionCurrency="USD" tradeDate="20260629" dateTime="20260629;143001" settleDateTarget="20260701" openCloseIndicator="C" notes="" fifoPnlRealized="47.00" ibExecID="0000e0d5.22222222.01.01" ibOrderID="482915002" transactionID="90002"/>
+<Trade accountId="U7654321" symbol="AAPL  260708C00190000" description="AAPL 08JUL26 190.0 C" conid="7811223344" assetCategory="OPT" currency="USD" fxRateToBase="0.93" multiplier="100" strike="190" expiry="20260708" putCall="C" underlyingConid="265598" underlyingSymbol="AAPL" listingExchange="CBOE" isin="" buySell="BUY" quantity="2" tradePrice="3.20" proceeds="-640" ibCommission="-1.30" ibCommissionCurrency="USD" tradeDate="20260630" dateTime="20260630;154522" settleDateTarget="20260701" openCloseIndicator="O" notes="" fifoPnlRealized="0" ibExecID="0000e0d5.33333333.01.01" ibOrderID="482915003" transactionID="90003"/>
+<Trade accountId="U7654321" symbol="MSFT" description="MICROSOFT CORP" conid="272093" assetCategory="STK" currency="USD" fxRateToBase="0.93" multiplier="1" strike="" expiry="" putCall="" underlyingConid="" underlyingSymbol="" listingExchange="NASDAQ" isin="US5949181045" buySell="BUY" quantity="5" tradePrice="445.10" proceeds="-2225.5" ibCommission="-1.00" ibCommissionCurrency="USD" tradeDate="20260701" dateTime="20260701;161210" settleDateTarget="20260703" openCloseIndicator="O" notes="" fifoPnlRealized="0" ibExecID="0000e0d5.44444444.01.01" ibOrderID="482915004" transactionID="90004"/>
+</Trades>
+<OpenPositions>
+<OpenPosition accountId="U7654321" levelOfDetail="SUMMARY" reportDate="20260702" symbol="AAPL  260708C00190000" description="AAPL 08JUL26 190.0 C" conid="7811223344" assetCategory="OPT" currency="USD" fxRateToBase="0.93" multiplier="100" strike="190" expiry="20260708" putCall="C" underlyingConid="265598" underlyingSymbol="AAPL" position="2" markPrice="4.10" costBasisPrice="3.20" positionValue="820" fifoPnlUnrealized="180"/>
+<OpenPosition accountId="U7654321" levelOfDetail="SUMMARY" reportDate="20260702" symbol="MSFT" description="MICROSOFT CORP" conid="272093" assetCategory="STK" currency="USD" fxRateToBase="0.93" multiplier="1" strike="" expiry="" putCall="" underlyingConid="" underlyingSymbol="" position="5" markPrice="448.30" costBasisPrice="445.10" positionValue="2241.50" fifoPnlUnrealized="16.00"/>
+</OpenPositions>
+<EquitySummaryInBase>
+<EquitySummaryByReportDateInBase reportDate="20260627" cash="12480.20" stock="30125.00" options="0" total="42605.20"/>
+<EquitySummaryByReportDateInBase reportDate="20260630" cash="12439.55" stock="30310.40" options="612.40" total="43362.35"/>
+<EquitySummaryByReportDateInBase reportDate="20260701" cash="10370.10" stock="32410.85" options="655.90" total="43436.85"/>
+<EquitySummaryByReportDateInBase reportDate="20260702" cash="10370.10" stock="32502.30" options="762.60" total="43635.00"/>
+</EquitySummaryInBase>
+<CashReport>
+<CashReportCurrency currency="BASE_SUMMARY" endingCash="10370.10" fxRateToBase="1" toDate="20260702"/>
+<CashReportCurrency currency="EUR" endingCash="6210.45" fxRateToBase="1" toDate="20260702"/>
+<CashReportCurrency currency="USD" endingCash="4472.74" fxRateToBase="0.93" toDate="20260702"/>
+</CashReport>
+<CashTransactions>
+<CashTransaction accountId="U7654321" type="Dividends" amount="12.40" currency="USD" fxRateToBase="0.93" dateTime="20260701;050000" description="AAPL CASH DIVIDEND USD 0.31 PER SHARE" transactionID="95001"/>
+</CashTransactions>
+<CorporateActions/>
+<ChangeInNAV fromDate="20260627" toDate="20260702" depositsWithdrawals="0" mtm="982.45"/>
+</FlexStatement>
+</FlexStatements>
+</FlexQueryResponse>

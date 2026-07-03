@@ -1,13 +1,25 @@
 import Image from "next/image";
 import { signOut } from "@/lib/auth";
+import { prisma } from "@/lib/db/client";
+import { SyncButton } from "./SyncButton";
 
 type HeaderUser = {
+  id: string;
   name?: string | null;
   email?: string | null;
   image?: string | null;
 };
 
-export function Header({ user }: { user: HeaderUser }) {
+export async function Header({ user }: { user: HeaderUser }) {
+  const [accountCount, lastSuccess] = await Promise.all([
+    prisma.ibkrAccount.count({ where: { userId: user.id } }),
+    prisma.syncRun.findFirst({
+      where: { status: "SUCCESS", account: { userId: user.id } },
+      orderBy: { finishedAt: "desc" },
+      select: { finishedAt: true },
+    }),
+  ]);
+
   return (
     <header className="sticky top-0 z-10 flex h-14 items-center justify-between border-b border-edge bg-bg/90 px-6 backdrop-blur">
       <div className="flex items-center gap-3 text-sm text-ink-soft">
@@ -18,7 +30,14 @@ export function Header({ user }: { user: HeaderUser }) {
           }).format(new Date())}
         </span>
         <span className="text-ink-mute">·</span>
-        <span className="text-ink-mute">Données IBKR</span>
+        <span className="text-ink-mute">
+          {lastSuccess?.finishedAt
+            ? `Dernière sync ${new Intl.DateTimeFormat("fr-FR", {
+                timeStyle: "short",
+                timeZone: "Europe/Paris",
+              }).format(lastSuccess.finishedAt)}`
+            : "Données IBKR"}
+        </span>
       </div>
 
       <div className="flex items-center gap-4">
@@ -31,14 +50,7 @@ export function Header({ user }: { user: HeaderUser }) {
           <span className="font-mono tabular-nums text-ink-soft">—</span>
         </div>
 
-        <button
-          type="button"
-          disabled
-          title="Disponible après la configuration IBKR (M1)"
-          className="cursor-not-allowed rounded-lg border border-edge bg-surface px-3 py-1.5 text-xs font-medium text-ink-mute"
-        >
-          Sync
-        </button>
+        <SyncButton disabled={accountCount === 0} />
 
         <div className="flex items-center gap-2.5 border-l border-edge pl-4">
           {user.image ? (
