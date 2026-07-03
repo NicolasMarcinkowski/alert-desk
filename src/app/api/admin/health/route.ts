@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/db/client";
 import { validateAuthToken, unauthorized } from "@/lib/api/validation";
+import { engineStatus } from "@/lib/engine/runtime";
 
 export async function GET(request: Request) {
   if (!validateAuthToken(request, "ADMIN_TOKEN")) return unauthorized();
@@ -22,6 +23,7 @@ export async function GET(request: Request) {
       db: "up",
       counts: { accounts, executions, positions, roundTrips },
       lastSyncRun: lastRun,
+      engine: engineStatus(),
     });
   } catch (e) {
     return Response.json(

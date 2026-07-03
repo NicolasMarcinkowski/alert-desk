@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { auth } from "@/lib/auth";
-import { getDashboard } from "@/lib/db/queries";
+import { getDashboard, getHeaderStats } from "@/lib/db/queries";
+import { LiveIntradayTile } from "@/components/dashboard/LiveIntradayTile";
 import { Card } from "@/components/ui/Card";
 import { KpiTile } from "@/components/ui/KpiTile";
 import { EquityCurve } from "@/components/ui/EquityCurve";
@@ -19,7 +20,10 @@ export const dynamic = "force-dynamic";
 
 export default async function DashboardPage() {
   const session = await auth();
-  const data = await getDashboard(session!.user.id);
+  const [data, headerStats] = await Promise.all([
+    getDashboard(session!.user.id),
+    getHeaderStats(session!.user.id),
+  ]);
   const ccy = data.baseCurrency;
 
   return (
@@ -46,12 +50,7 @@ export default async function DashboardPage() {
           sub={data.navDate ? `clôture ${formatDate(data.navDate)}` : "aucun snapshot"}
           freshness="eod"
         />
-        <KpiTile
-          label="Δ Intraday"
-          value="—"
-          sub="estimé sur positions (M2)"
-          freshness="live"
-        />
+        <LiveIntradayTile positions={headerStats.positions} currency={ccy} />
         <KpiTile
           label="Réalisé jour"
           value={

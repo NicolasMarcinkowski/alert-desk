@@ -20,6 +20,7 @@ async function userAccountIds(userId: string): Promise<string[]> {
 export interface PositionRow {
   id: string;
   symbol: string;
+  occSymbol: string | null;
   secType: "STK" | "OPT" | "CASH" | "OTHER";
   underlyingSymbol: string | null;
   expiry: Date | null;
@@ -71,6 +72,7 @@ export async function getPositionGroups(
     rows.push({
       id: p.id,
       symbol: p.instrument.symbol,
+      occSymbol: p.instrument.occSymbol,
       secType: p.instrument.secType,
       underlyingSymbol: p.instrument.underlyingSymbol,
       expiry: p.instrument.expiry,
@@ -110,6 +112,75 @@ export async function getPositionGroups(
       };
     })
     .sort((a, b) => a.underlying.localeCompare(b.underlying));
+}
+
+// ─── Live (header, dashboard) ────────────────────────────────────
+
+/** Position allégée pour le calcul client du P&L latent live. */
+export interface LivePositionLite {
+  /** Clé du cache de quotes : ticker STK ou OCC compact OPT */
+  key: string;
+  quantity: number;
+  avgCost: number;
+  multiplier: number;
+  fxRateToBase: number;
+}
+
+export interface HeaderStats {
+  realizedTodayBase: number;
+  executionsToday: number;
+  baseCurrency: string;
+  positions: LivePositionLite[];
+}
+
+export async function getHeaderStats(userId: string): Promise<HeaderStats> {
+  const accountIds = await userAccountIds(userId);
+  const now = new Date();
+  const todayUtc = new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())
+  );
+
+  const [todayExecutions, positions, account] = await Promise.all([
+    prisma.execution.findMany({
+      where: { ibkrAccountId: { in: accountIds }, tradeDate: todayUtc },
+      select: { fifoPnlRealized: true, fxRateToBase: true },
+    }),
+    prisma.position.findMany({
+      where: { ibkrAccountId: { in: accountIds } },
+      include: {
+        instrument: {
+          select: { symbol: true, occSymbol: true, secType: true, multiplier: true },
+        },
+      },
+    }),
+    prisma.ibkrAccount.findFirst({
+      where: { id: { in: accountIds } },
+      select: { baseCurrency: true },
+    }),
+  ]);
+
+  let realizedToday = 0;
+  for (const e of todayExecutions) {
+    if (e.fifoPnlRealized !== null) {
+      realizedToday += Number(e.fifoPnlRealized) * Number(e.fxRateToBase);
+    }
+  }
+
+  return {
+    realizedTodayBase: realizedToday,
+    executionsToday: todayExecutions.length,
+    baseCurrency: account?.baseCurrency ?? "EUR",
+    positions: positions.map((p) => ({
+      key:
+        p.instrument.secType === "OPT"
+          ? (p.instrument.occSymbol ?? p.instrument.symbol)
+          : p.instrument.symbol,
+      quantity: Number(p.quantity),
+      avgCost: Number(p.avgCost),
+      multiplier: Number(p.instrument.multiplier),
+      fxRateToBase: Number(p.fxRateToBase),
+    })),
+  };
 }
 
 // ─── Journal ─────────────────────────────────────────────────────

@@ -1,7 +1,9 @@
 import Image from "next/image";
 import { signOut } from "@/lib/auth";
 import { prisma } from "@/lib/db/client";
+import { getHeaderStats } from "@/lib/db/queries";
 import { SyncButton } from "./SyncButton";
+import { LivePnlChip } from "./LivePnlChip";
 
 type HeaderUser = {
   id: string;
@@ -11,13 +13,14 @@ type HeaderUser = {
 };
 
 export async function Header({ user }: { user: HeaderUser }) {
-  const [accountCount, lastSuccess] = await Promise.all([
+  const [accountCount, lastSuccess, stats] = await Promise.all([
     prisma.ibkrAccount.count({ where: { userId: user.id } }),
     prisma.syncRun.findFirst({
       where: { status: "SUCCESS", account: { userId: user.id } },
       orderBy: { finishedAt: "desc" },
       select: { finishedAt: true },
     }),
+    getHeaderStats(user.id),
   ]);
 
   return (
@@ -41,14 +44,12 @@ export async function Header({ user }: { user: HeaderUser }) {
       </div>
 
       <div className="flex items-center gap-4">
-        {/* Chip P&L réalisé | latent — branché au jalon M2 */}
-        <div className="flex items-center gap-3 rounded-lg border border-edge bg-surface px-3 py-1.5 text-xs">
-          <span className="text-ink-mute">Réalisé jour</span>
-          <span className="font-mono tabular-nums text-ink-soft">—</span>
-          <span className="h-3 w-px bg-edge" />
-          <span className="text-ink-mute">Latent</span>
-          <span className="font-mono tabular-nums text-ink-soft">—</span>
-        </div>
+        <LivePnlChip
+          realizedToday={stats.realizedTodayBase}
+          executionsToday={stats.executionsToday}
+          positions={stats.positions}
+          currency={stats.baseCurrency}
+        />
 
         <SyncButton disabled={accountCount === 0} />
 

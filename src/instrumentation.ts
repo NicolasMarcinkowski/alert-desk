@@ -1,7 +1,7 @@
 /**
  * Hook de démarrage Next.js (runtime nodejs uniquement).
  * M1 : sweep des SyncRun RUNNING orphelins après crash.
- * M2 : démarrage du moteur market data / alertes.
+ * M2 : démarrage du moteur market data (souscriptions, polling, SSE).
  */
 export async function register() {
   if (process.env.NEXT_RUNTIME !== "nodejs") return;
@@ -15,5 +15,12 @@ export async function register() {
   } catch (e) {
     // DB potentiellement indisponible au boot (migrations en cours) — non fatal
     console.error("[startup] sweep SyncRuns impossible:", e);
+  }
+
+  try {
+    const { startEngine } = await import("@/lib/engine/runtime");
+    startEngine();
+  } catch (e) {
+    console.error("[startup] démarrage moteur impossible:", e);
   }
 }

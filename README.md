@@ -37,10 +37,17 @@ Dans Client Portal IBKR → *Performance & Reports* → *Flex Queries* :
   - toutes les 15 min, lun–ven 15h–22h30 (Paris) : `curl -H "Authorization: Bearer $CRON_SECRET" https://<domaine>/api/cron/intraday`
   - une fois par nuit vers 08h00 (Paris) : `curl -H "Authorization: Bearer $CRON_SECRET" https://<domaine>/api/cron/nightly`
 
+## Données de marché (M2)
+
+- **Actions US en temps réel : Finnhub** — crée une clé gratuite sur finnhub.io (60 req/min + websocket 50 symboles) et renseigne `FINNHUB_API_KEY`. Sans clé, l'app fonctionne mais les cotations actions passent en différé best-effort.
+- **Options : Yahoo Finance (non officiel, différé ~15 min)** via le symbole OCC — best effort avec disjoncteur anti-429 ; en cas d'indisponibilité, l'UI retombe sur le dernier mark EOD du relevé IBKR (badge `EOD`). La vraie source temps réel options = gateway IBKR (v2).
+- Chaque valeur affichée porte un badge de fraîcheur : `LIVE` / `~15 MIN` / `EOD`.
+- Flux navigateur : SSE sur `/api/stream` (session requise) ; snapshot REST sur `/api/quotes`.
+
 ## Jalons
 
 - **M0** ✅ Socle : auth Google + allowlist, layout, Docker/CI-CD.
-- **M1** Import IBKR (Flex), positions & journal.
-- **M2** Données de marché live (Finnhub + SSE), watchlist.
+- **M1** ✅ Import IBKR (Flex), positions & journal.
+- **M2** ✅ Données de marché live (Finnhub + SSE), P&L latent, watchlist.
 - **M3** Alertes + notifications Telegram/Discord.
 - **M4** Analytics, détail de trade (notes/tags/stratégie), mobile.
