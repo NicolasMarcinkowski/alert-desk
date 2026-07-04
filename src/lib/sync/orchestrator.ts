@@ -87,7 +87,11 @@ export async function processStatementXml(
 
   let statements: ParsedFlexStatement[];
   try {
-    statements = parseFlexXml(xml);
+    // Fuseau configuré sur le compte IBKR (horodatages Flex sans offset) —
+    // surchargable via IBKR_ACCOUNT_TIMEZONE si le compte n'est pas sur NY
+    statements = parseFlexXml(xml, {
+      accountTimeZone: process.env.IBKR_ACCOUNT_TIMEZONE,
+    });
   } catch (e) {
     await prisma.flexStatementRaw.update({
       where: { id: raw.id },

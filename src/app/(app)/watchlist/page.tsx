@@ -19,10 +19,18 @@ export default async function WatchlistPage() {
 
   // Enrichissement nom + bornes 52 sem. (Finnhub, caché 24 h) — best effort
   const finnhub = getFinnhub();
+  const withTimeout = <T,>(p: Promise<T>, ms: number): Promise<T | null> =>
+    Promise.race([p, new Promise<null>((r) => setTimeout(() => r(null), ms))]);
   const enriched: WatchlistItemData[] = await Promise.all(
     items.map(async (item) => {
+      // 1,5 s max par symbole : à froid le SSR ne bloque pas sur le rate
+      // limiter Finnhub ; le fetch continue en tâche de fond et remplit le
+      // cache 24 h pour le rendu suivant
       const meta = finnhub
-        ? await finnhub.getMeta(item.symbol).catch(() => null)
+        ? await withTimeout(
+            finnhub.getMeta(item.symbol).catch(() => null),
+            1_500
+          )
         : null;
       return {
         id: item.id,

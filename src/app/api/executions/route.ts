@@ -36,17 +36,34 @@ export async function POST(request: Request) {
     return badRequest("symbole invalide");
   }
   if (!currency) return badRequest("devise invalide (code ISO, ex. USD)");
-  if (!Number.isFinite(quantity) || quantity <= 0) {
+  if (!Number.isFinite(quantity) || quantity <= 0 || quantity >= 1e9) {
     return badRequest("quantité invalide");
   }
-  if (!Number.isFinite(price) || price <= 0) return badRequest("prix invalide");
-  if (!Number.isFinite(fees) || fees < 0) return badRequest("frais invalides");
+  if (!Number.isFinite(price) || price <= 0 || price >= 1e9) {
+    return badRequest("prix invalide");
+  }
+  if (!Number.isFinite(fees) || fees < 0 || fees >= 1e9) {
+    return badRequest("frais invalides");
+  }
   if (typeof body.tradeAt !== "string") return badRequest("date requise");
+  // Infinity > 0 est vrai — Number.isFinite obligatoire avant Prisma Decimal
+  const fx = Number(body.fxRateToBase);
+  if (body.fxRateToBase !== undefined && (!Number.isFinite(fx) || fx <= 0)) {
+    return badRequest("taux de change invalide");
+  }
+  const mult = Number(body.multiplier);
+  if (
+    body.multiplier !== undefined &&
+    (!Number.isFinite(mult) || mult <= 0 || mult > 100_000)
+  ) {
+    return badRequest("multiplicateur invalide");
+  }
 
   if (secType === "OPT") {
     if (
       !Number.isFinite(Number(body.strike)) ||
       Number(body.strike) <= 0 ||
+      Number(body.strike) >= 1e9 ||
       !/^\d{4}-\d{2}-\d{2}$/.test(body.expiry ?? "") ||
       !["PUT", "CALL"].includes(body.putCall)
     ) {
@@ -64,13 +81,11 @@ export async function POST(request: Request) {
     price,
     fees,
     tradeAt: body.tradeAt,
-    fxRateToBase:
-      Number(body.fxRateToBase) > 0 ? Number(body.fxRateToBase) : undefined,
+    fxRateToBase: body.fxRateToBase !== undefined ? fx : undefined,
     strike: secType === "OPT" ? Number(body.strike) : undefined,
     expiry: secType === "OPT" ? body.expiry : undefined,
     putCall: secType === "OPT" ? body.putCall : undefined,
-    multiplier:
-      Number(body.multiplier) > 0 ? Number(body.multiplier) : undefined,
+    multiplier: body.multiplier !== undefined ? mult : undefined,
   };
 
   try {

@@ -48,6 +48,12 @@ RUN echo '#!/bin/sh' > /app/start.sh && \
     echo 'node server.js' >> /app/start.sh && \
     chmod +x /app/start.sh
 
+# Utilisateur non-root (même pattern que palato-scoring)
+RUN addgroup --system --gid 1001 nodejs && \
+    adduser --system --uid 1001 nextjs && \
+    chown -R nextjs:nodejs /app
+USER nextjs
+
 EXPOSE 3000
 
 ENV PORT=3000

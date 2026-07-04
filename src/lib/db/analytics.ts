@@ -39,7 +39,6 @@ function periodStart(period: AnalyticsPeriod, now = new Date()): Date | null {
 }
 
 export interface AnalyticsData {
-  period: AnalyticsPeriod;
   baseCurrency: string;
   kpis: {
     netRealized: number;
@@ -56,7 +55,7 @@ export interface AnalyticsData {
     maxDrawdown: number | null;
     maxDrawdownPct: number | null;
   };
-  equity: { date: Date; nav: number; adjusted: number; drawdownPct: number }[];
+  equity: { date: Date; adjusted: number; drawdownPct: number }[];
   dailyPnl: { date: string; pnl: number }[];
   byUnderlying: { label: string; pnl: number; count: number }[];
   byStrategy: { label: string; pnl: number; count: number }[];
@@ -151,7 +150,7 @@ export async function getAnalytics(
         maxDrawdown = dd;
         maxDrawdownPct = ddPct;
       }
-      return { date: new Date(time), nav, adjusted, drawdownPct: ddPct };
+      return { date: new Date(time), adjusted, drawdownPct: ddPct };
     });
 
   // P&L quotidien net (niveau exécution, par date de trade)
@@ -195,7 +194,6 @@ export async function getAnalytics(
   }
 
   return {
-    period,
     baseCurrency,
     kpis: {
       netRealized,

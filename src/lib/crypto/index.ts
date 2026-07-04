@@ -6,6 +6,7 @@
  * La clé vient de APP_ENCRYPTION_KEY (32 octets encodés en base64).
  */
 
+import "server-only";
 import { createCipheriv, createDecipheriv, randomBytes } from "crypto";
 
 const VERSION_PREFIX = "v1:";

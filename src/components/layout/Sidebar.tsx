@@ -3,6 +3,11 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Logo } from "@/components/ui/Logo";
+import {
+  NAV_ANALYSE,
+  NAV_SURVEILLANCE,
+  isNavActive,
+} from "./nav-links";
 
 type NavItem = {
   href: string;
@@ -23,8 +28,8 @@ const iconProps = {
 
 const SURVEILLANCE: NavItem[] = [
   {
-    href: "/",
-    label: "Dashboard",
+    href: NAV_SURVEILLANCE[0].href,
+    label: NAV_SURVEILLANCE[0].label,
     icon: (
       <svg {...iconProps}>
         <rect x="3" y="3" width="7" height="9" rx="1" />
@@ -35,8 +40,8 @@ const SURVEILLANCE: NavItem[] = [
     ),
   },
   {
-    href: "/positions",
-    label: "Positions",
+    href: NAV_SURVEILLANCE[1].href,
+    label: NAV_SURVEILLANCE[1].label,
     icon: (
       <svg {...iconProps}>
         <path d="M3 17l6-6 4 4 8-8" />
@@ -45,8 +50,8 @@ const SURVEILLANCE: NavItem[] = [
     ),
   },
   {
-    href: "/alertes",
-    label: "Alertes",
+    href: NAV_SURVEILLANCE[2].href,
+    label: NAV_SURVEILLANCE[2].label,
     icon: (
       <svg {...iconProps}>
         <path d="M18 8a6 6 0 10-12 0c0 7-3 9-3 9h18s-3-2-3-9" />
@@ -58,8 +63,8 @@ const SURVEILLANCE: NavItem[] = [
 
 const ANALYSE: NavItem[] = [
   {
-    href: "/journal",
-    label: "Journal",
+    href: NAV_ANALYSE[0].href,
+    label: NAV_ANALYSE[0].label,
     icon: (
       <svg {...iconProps}>
         <path d="M4 4h16v16H4z" />
@@ -68,8 +73,8 @@ const ANALYSE: NavItem[] = [
     ),
   },
   {
-    href: "/watchlist",
-    label: "Watchlist",
+    href: NAV_ANALYSE[1].href,
+    label: NAV_ANALYSE[1].label,
     icon: (
       <svg {...iconProps}>
         <path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z" />
@@ -78,8 +83,8 @@ const ANALYSE: NavItem[] = [
     ),
   },
   {
-    href: "/analytics",
-    label: "Analytics",
+    href: NAV_ANALYSE[2].href,
+    label: NAV_ANALYSE[2].label,
     icon: (
       <svg {...iconProps}>
         <path d="M4 20V10M10 20V4M16 20v-8M22 20H2" />
@@ -138,11 +143,7 @@ function NavGroup({
           key={item.href}
           item={item}
           badge={badges?.[item.href]}
-          active={
-            item.href === "/"
-              ? pathname === "/"
-              : pathname.startsWith(item.href)
-          }
+          active={isNavActive(item.href, pathname)}
         />
       ))}
     </div>

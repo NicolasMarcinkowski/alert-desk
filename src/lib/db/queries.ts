@@ -5,15 +5,19 @@
  * les agrégats de référence restent en base).
  */
 
+import { cache } from "react";
 import { prisma } from "@/lib/db/client";
+import { daysToExpiry, formatOptionName } from "@/lib/utils/format";
 
-async function userAccountIds(userId: string): Promise<string[]> {
+// cache() de React : dédoublonne par requête HTTP (le Header du layout et la
+// page appellent les mêmes lectures sur un même rendu)
+const userAccountIds = cache(async (userId: string): Promise<string[]> => {
   const accounts = await prisma.brokerAccount.findMany({
     where: { userId },
     select: { id: true },
   });
   return accounts.map((a) => a.id);
-}
+});
 
 // ─── Positions ───────────────────────────────────────────────────
 
@@ -33,63 +37,63 @@ export interface PositionRow {
   fxRateToBase: number;
   state: "SNAPSHOT_CONFIRMED" | "INTRADAY_ESTIMATED";
   driftDetected: boolean;
-  /** Mark EOD du dernier snapshot (null si position purement intraday) */
+  /** Mark EOD du dernier snapshot (null si position purement intraday) —
+   *  le P&L latent est recalculé côté client sur les quotes live */
   markPrice: number | null;
-  unrealizedPnl: number | null;
-  unrealizedPnlBase: number | null;
 }
 
 export interface PositionGroup {
   underlying: string;
   rows: PositionRow[];
-  totalUnrealizedBase: number | null;
 }
 
 export async function getPositionGroups(
   userId: string
 ): Promise<PositionGroup[]> {
   const accountIds = await userAccountIds(userId);
-  const positions = await prisma.position.findMany({
-    where: { brokerAccountId: { in: accountIds } },
-    include: { instrument: true },
-  });
-
-  const rows: PositionRow[] = [];
-  for (const p of positions) {
-    const snapshot = await prisma.positionSnapshot.findFirst({
-      where: { brokerAccountId: p.brokerAccountId, instrumentId: p.instrumentId },
+  // 2 requêtes quel que soit le nombre de positions (pas de N+1) :
+  // le dernier mark par (compte, instrument) vient d'un seul findMany distinct
+  const [positions, latestSnapshots] = await Promise.all([
+    prisma.position.findMany({
+      where: { brokerAccountId: { in: accountIds } },
+      include: { instrument: true },
+    }),
+    prisma.positionSnapshot.findMany({
+      where: { brokerAccountId: { in: accountIds } },
       orderBy: { date: "desc" },
-    });
+      distinct: ["brokerAccountId", "instrumentId"],
+      select: {
+        brokerAccountId: true,
+        instrumentId: true,
+        markPrice: true,
+      },
+    }),
+  ]);
+  const markByKey = new Map(
+    latestSnapshots.map((s) => [
+      `${s.brokerAccountId}:${s.instrumentId}`,
+      Number(s.markPrice),
+    ])
+  );
 
-    const qty = Number(p.quantity);
-    const avgCost = Number(p.avgCost);
-    const multiplier = Number(p.instrument.multiplier);
-    const fx = Number(p.fxRateToBase);
-    const mark = snapshot ? Number(snapshot.markPrice) : null;
-    const unrealized =
-      mark !== null ? (mark - avgCost) * qty * multiplier : null;
-
-    rows.push({
-      id: p.id,
-      symbol: p.instrument.symbol,
-      occSymbol: p.instrument.occSymbol,
-      secType: p.instrument.secType,
-      underlyingSymbol: p.instrument.underlyingSymbol,
-      expiry: p.instrument.expiry,
-      strike: p.instrument.strike,
-      putCall: p.instrument.putCall,
-      multiplier,
-      quantity: qty,
-      avgCost,
-      currency: p.currency,
-      fxRateToBase: fx,
-      state: p.state,
-      driftDetected: p.driftDetected,
-      markPrice: mark,
-      unrealizedPnl: unrealized,
-      unrealizedPnlBase: unrealized !== null ? unrealized * fx : null,
-    });
-  }
+  const rows: PositionRow[] = positions.map((p) => ({
+    id: p.id,
+    symbol: p.instrument.symbol,
+    occSymbol: p.instrument.occSymbol,
+    secType: p.instrument.secType,
+    underlyingSymbol: p.instrument.underlyingSymbol,
+    expiry: p.instrument.expiry,
+    strike: p.instrument.strike,
+    putCall: p.instrument.putCall,
+    multiplier: Number(p.instrument.multiplier),
+    quantity: Number(p.quantity),
+    avgCost: Number(p.avgCost),
+    currency: p.currency,
+    fxRateToBase: Number(p.fxRateToBase),
+    state: p.state,
+    driftDetected: p.driftDetected,
+    markPrice: markByKey.get(`${p.brokerAccountId}:${p.instrumentId}`) ?? null,
+  }));
 
   const groups = new Map<string, PositionRow[]>();
   for (const row of rows) {
@@ -100,17 +104,13 @@ export async function getPositionGroups(
   }
 
   return Array.from(groups.entries())
-    .map(([underlying, groupRows]) => {
-      const withPnl = groupRows.filter((r) => r.unrealizedPnlBase !== null);
-      return {
-        underlying,
-        rows: groupRows.sort((a, b) => (a.secType === "STK" ? -1 : 1) - (b.secType === "STK" ? -1 : 1)),
-        totalUnrealizedBase:
-          withPnl.length > 0
-            ? withPnl.reduce((sum, r) => sum + (r.unrealizedPnlBase ?? 0), 0)
-            : null,
-      };
-    })
+    .map(([underlying, groupRows]) => ({
+      underlying,
+      rows: groupRows.sort(
+        (a, b) =>
+          (a.secType === "STK" ? -1 : 1) - (b.secType === "STK" ? -1 : 1)
+      ),
+    }))
     .sort((a, b) => a.underlying.localeCompare(b.underlying));
 }
 
@@ -133,7 +133,9 @@ export interface HeaderStats {
   positions: LivePositionLite[];
 }
 
-export async function getHeaderStats(userId: string): Promise<HeaderStats> {
+export const getHeaderStats = cache(async function getHeaderStats(
+  userId: string
+): Promise<HeaderStats> {
   const accountIds = await userAccountIds(userId);
   const now = new Date();
   const todayUtc = new Date(
@@ -181,7 +183,7 @@ export async function getHeaderStats(userId: string): Promise<HeaderStats> {
       fxRateToBase: Number(p.fxRateToBase),
     })),
   };
-}
+});
 
 // ─── Journal ─────────────────────────────────────────────────────
 
@@ -196,14 +198,12 @@ export interface RoundTripRow {
   closedAt: Date | null;
   maxQuantity: number;
   realizedPnl: number | null;
-  realizedPnlBase: number | null;
   commissions: number;
   currency: string;
   pnlConfirmed: boolean;
   strategy: string | null;
   tags: string[];
   rating: number | null;
-  executionCount: number;
 }
 
 export interface JournalKpis {
@@ -222,8 +222,14 @@ export async function getJournal(userId: string): Promise<{
   const trips = await prisma.roundTrip.findMany({
     where: { brokerAccountId: { in: accountIds } },
     include: {
-      instrument: true,
-      _count: { select: { executions: true } },
+      instrument: {
+        select: {
+          symbol: true,
+          underlyingSymbol: true,
+          secType: true,
+          currency: true,
+        },
+      },
     },
     orderBy: [{ openedAt: "desc" }],
     take: 200,
@@ -240,15 +246,12 @@ export async function getJournal(userId: string): Promise<{
     closedAt: t.closedAt,
     maxQuantity: Number(t.maxQuantity),
     realizedPnl: t.realizedPnl !== null ? Number(t.realizedPnl) : null,
-    realizedPnlBase:
-      t.realizedPnlBase !== null ? Number(t.realizedPnlBase) : null,
     commissions: Number(t.commissions),
     currency: t.instrument.currency,
     pnlConfirmed: t.pnlConfirmed,
     strategy: t.strategy,
     tags: t.tags,
     rating: t.rating,
-    executionCount: t._count.executions,
   }));
 
   // KPI globaux au niveau exécution (devise de base via fxRateToBase)
@@ -264,8 +267,12 @@ export async function getJournal(userId: string): Promise<{
     fees += Math.abs(Number(e.commission)) * fx;
   }
 
+  // WIN = P&L NET (frais déduits) positif — même sémantique que la table
+  // du journal et que les analytics
   const closed = rows.filter((r) => r.status === "CLOSED");
-  const winCount = closed.filter((r) => (r.realizedPnl ?? 0) > 0).length;
+  const winCount = closed.filter(
+    (r) => (r.realizedPnl ?? 0) - r.commissions > 0
+  ).length;
 
   return {
     trips: rows,
@@ -328,37 +335,86 @@ export async function getDashboard(userId: string): Promise<DashboardData> {
     Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)
   );
 
-  // NAV = somme des derniers snapshots par compte
+  // Toutes les lectures indépendantes en parallèle ; le NAV par compte vient
+  // d'une seule requête distinct (pas de findFirst par compte en boucle)
+  const [
+    latestSnaps,
+    executions,
+    mtdClosed,
+    snapshots,
+    optPositions,
+    recentExecutions,
+    recentAlerts,
+  ] = await Promise.all([
+    prisma.accountSnapshot.findMany({
+      where: { brokerAccountId: { in: accountIds } },
+      orderBy: { date: "desc" },
+      distinct: ["brokerAccountId"],
+      select: { nav: true, date: true, baseCurrency: true },
+    }),
+    prisma.execution.findMany({
+      where: {
+        brokerAccountId: { in: accountIds },
+        tradeDate: { gte: monthStartUtc },
+      },
+      select: {
+        fifoPnlRealized: true,
+        commission: true,
+        fxRateToBase: true,
+        tradeDate: true,
+      },
+    }),
+    prisma.roundTrip.findMany({
+      where: {
+        brokerAccountId: { in: accountIds },
+        status: "CLOSED",
+        closedAt: { gte: monthStartUtc },
+      },
+      select: { realizedPnl: true, commissions: true },
+    }),
+    prisma.accountSnapshot.findMany({
+      where: {
+        brokerAccountId: { in: accountIds },
+        date: { gte: new Date(now.getTime() - 180 * 86_400_000) },
+      },
+      orderBy: { date: "asc" },
+      select: { date: true, nav: true },
+    }),
+    prisma.position.findMany({
+      where: {
+        brokerAccountId: { in: accountIds },
+        instrument: {
+          secType: "OPT",
+          expiry: { lte: new Date(now.getTime() + 7 * 86_400_000) },
+        },
+      },
+      include: { instrument: true },
+    }),
+    prisma.execution.findMany({
+      where: { brokerAccountId: { in: accountIds } },
+      orderBy: { tradeTime: "desc" },
+      take: 8,
+      include: { instrument: { select: { symbol: true } } },
+    }),
+    prisma.alertEvent.findMany({
+      where: { rule: { userId } },
+      orderBy: { triggeredAt: "desc" },
+      take: 5,
+      select: { id: true, message: true, triggeredAt: true },
+    }),
+  ]);
+
   let nav: number | null = null;
   let navDate: Date | null = null;
   let baseCurrency = "EUR";
-  for (const accountId of accountIds) {
-    const snap = await prisma.accountSnapshot.findFirst({
-      where: { brokerAccountId: accountId },
-      orderBy: { date: "desc" },
-    });
-    if (snap) {
-      nav = (nav ?? 0) + Number(snap.nav);
-      if (navDate === null || snap.date.getTime() > navDate.getTime()) {
-        navDate = snap.date;
-      }
-      baseCurrency = snap.baseCurrency;
+  for (const snap of latestSnaps) {
+    nav = (nav ?? 0) + Number(snap.nav);
+    if (navDate === null || snap.date.getTime() > navDate.getTime()) {
+      navDate = snap.date;
     }
+    baseCurrency = snap.baseCurrency;
   }
 
-  // Réalisé / frais (niveau exécution, converti en base)
-  const executions = await prisma.execution.findMany({
-    where: {
-      brokerAccountId: { in: accountIds },
-      tradeDate: { gte: monthStartUtc },
-    },
-    select: {
-      fifoPnlRealized: true,
-      commission: true,
-      fxRateToBase: true,
-      tradeDate: true,
-    },
-  });
   let realizedToday = 0;
   let todayCount = 0;
   let realizedMtd = 0;
@@ -374,27 +430,13 @@ export async function getDashboard(userId: string): Promise<DashboardData> {
     }
   }
 
-  const mtdClosed = await prisma.roundTrip.findMany({
-    where: {
-      brokerAccountId: { in: accountIds },
-      status: "CLOSED",
-      closedAt: { gte: monthStartUtc },
-    },
-    select: { realizedPnl: true },
-  });
+  // WIN = P&L net (frais déduits) — même sémantique que journal et analytics
   const mtdWins = mtdClosed.filter(
-    (t) => t.realizedPnl !== null && Number(t.realizedPnl) > 0
+    (t) =>
+      t.realizedPnl !== null &&
+      Number(t.realizedPnl) - Number(t.commissions) > 0
   ).length;
 
-  // Courbe d'equity (180 jours, sommée par date)
-  const snapshots = await prisma.accountSnapshot.findMany({
-    where: {
-      brokerAccountId: { in: accountIds },
-      date: { gte: new Date(now.getTime() - 180 * 86_400_000) },
-    },
-    orderBy: { date: "asc" },
-    select: { date: true, nav: true },
-  });
   const byDate = new Map<number, number>();
   for (const s of snapshots) {
     const key = s.date.getTime();
@@ -403,36 +445,6 @@ export async function getDashboard(userId: string): Promise<DashboardData> {
   const equityCurve = Array.from(byDate.entries())
     .sort(([a], [b]) => a - b)
     .map(([time, value]) => ({ date: new Date(time), nav: value }));
-
-  // Échéances options ≤ 7 jours
-  const optPositions = await prisma.position.findMany({
-    where: {
-      brokerAccountId: { in: accountIds },
-      instrument: {
-        secType: "OPT",
-        expiry: { lte: new Date(now.getTime() + 7 * 86_400_000) },
-      },
-    },
-    include: { instrument: true },
-  });
-
-  const recentExecutions = await prisma.execution.findMany({
-    where: { brokerAccountId: { in: accountIds } },
-    orderBy: { tradeTime: "desc" },
-    take: 8,
-    include: { instrument: { select: { symbol: true } } },
-  });
-
-  const recentAlerts = await prisma.alertEvent.findMany({
-    where: { rule: { userId } },
-    orderBy: { triggeredAt: "desc" },
-    take: 5,
-    select: { id: true, message: true, triggeredAt: true },
-  });
-
-  const { daysToExpiry, formatOptionName } = await import(
-    "@/lib/utils/format"
-  );
 
   return {
     nav,

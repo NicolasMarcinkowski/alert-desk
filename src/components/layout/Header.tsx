@@ -39,7 +39,7 @@ export async function Header({ user }: { user: HeaderUser }) {
                 timeStyle: "short",
                 timeZone: "Europe/Paris",
               }).format(lastSuccess.finishedAt)}`
-            : "Données IBKR"}
+            : "Aucune sync broker"}
         </span>
       </div>
 

@@ -1,20 +1,23 @@
 import { requireSession, unauthorized } from "@/lib/api/validation";
 import { quoteCache } from "@/lib/marketdata/quote-cache";
 import { sseHub } from "@/lib/engine/sse-hub";
+import { getUserSymbolKeys } from "@/lib/engine/user-symbols";
 
 export const dynamic = "force-dynamic";
 
 const HEARTBEAT_MS = 25_000;
 
 /**
- * Flux SSE : snapshot initial du cache de quotes puis événements nommés
- * `quote` (M3 : + `alert`, `sync`). Heartbeat 25 s contre les timeouts
- * du reverse proxy ; headers anti-buffering pour le NAS.
+ * Flux SSE : snapshot initial filtré (symboles de l'utilisateur uniquement)
+ * puis événements nommés `quotes` (lots coalescés), `alert`, `sync`.
+ * Heartbeat 25 s contre les timeouts du reverse proxy ; headers
+ * anti-buffering pour le NAS.
  */
 export async function GET(request: Request) {
   const session = await requireSession();
   if (!session) return unauthorized();
 
+  const symbols = await getUserSymbolKeys(session.user.id);
   const encoder = new TextEncoder();
   let clientId: number | null = null;
   let heartbeat: ReturnType<typeof setInterval> | null = null;
@@ -27,8 +30,11 @@ export async function GET(request: Request) {
         );
       };
 
-      clientId = sseHub.register(session.user.id, send);
-      send("snapshot", quoteCache.snapshot());
+      clientId = sseHub.register(session.user.id, symbols, send);
+      send(
+        "snapshot",
+        quoteCache.snapshot().filter((q) => symbols.has(q.symbol))
+      );
 
       heartbeat = setInterval(() => {
         try {

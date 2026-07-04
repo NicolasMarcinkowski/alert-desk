@@ -75,7 +75,7 @@ export default async function JournalPage() {
         <KpiTile
           label="Frais totaux"
           value={kpis.feesBase > 0 ? formatMoney(kpis.feesBase) : "—"}
-          sub="commissions IBKR"
+          sub="commissions"
         />
       </div>
 

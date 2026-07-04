@@ -31,6 +31,7 @@ import { sseHub } from "./sse-hub";
 export interface EvaluatorPosition {
   /** Clé du cache de quotes */
   key: string;
+  brokerAccountId: string;
   instrumentId: string;
   quantity: number;
   avgCost: number;
@@ -83,7 +84,11 @@ export async function loadAlertRules(
     include: { instrument: { select: { id: true } } },
   });
 
-  const byInstrument = new Map(positions.map((p) => [p.instrumentId, p]));
+  // Clé compte+instrument : deux utilisateurs peuvent détenir le même
+  // instrument — une règle ne doit évaluer QUE la position de son compte.
+  const byAccountInstrument = new Map(
+    positions.map((p) => [`${p.brokerAccountId}:${p.instrumentId}`, p])
+  );
   const map = new Map<string, RuleRuntime[]>();
 
   for (const rule of rules) {
@@ -92,8 +97,10 @@ export async function loadAlertRules(
     let position: EvaluatorPosition | undefined;
 
     if (rule.type === "POSITION_PNL_ABOVE" || rule.type === "POSITION_PNL_BELOW") {
-      if (!rule.instrumentId) continue;
-      position = byInstrument.get(rule.instrumentId);
+      if (!rule.instrumentId || !rule.brokerAccountId) continue;
+      position = byAccountInstrument.get(
+        `${rule.brokerAccountId}:${rule.instrumentId}`
+      );
       // Pas de position ouverte sur l'instrument → règle dormante
       if (!position) continue;
       symbolKey = position.key;

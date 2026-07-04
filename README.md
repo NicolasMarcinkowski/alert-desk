@@ -17,7 +17,7 @@ Next.js 16 (App Router, full-stack) · React 19 · TypeScript · Tailwind CSS 4 
 ## Dev local
 
 ```bash
-cp .env.example .env.local     # remplir AUTH_SECRET, GOOGLE_*, ALLOWED_EMAILS, APP_ENCRYPTION_KEY
+cp .env.example .env           # remplir NEXTAUTH_SECRET, GOOGLE_*, ALLOWED_EMAILS, APP_ENCRYPTION_KEY
 docker compose up -d           # Postgres 18 local (port hôte 5433)
 yarn install                   # génère aussi le client Prisma (postinstall)
 yarn prisma migrate dev        # applique les migrations

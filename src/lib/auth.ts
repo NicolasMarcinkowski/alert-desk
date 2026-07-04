@@ -18,6 +18,10 @@ function isEmailAllowed(email: string | null | undefined): boolean {
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
   adapter: PrismaAdapter(prisma),
+  // Noms d'env alignés sur palato-scoring (NEXTAUTH_*, lus aussi par Auth.js v5)
+  secret: process.env.NEXTAUTH_SECRET,
+  // Derrière le reverse proxy du NAS — remplace AUTH_TRUST_HOST=true
+  trustHost: true,
   providers: [
     Google({
       clientId: process.env.GOOGLE_CLIENT_ID!,
@@ -34,6 +38,11 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     async jwt({ token, user }) {
       if (user) {
         token.id = user.id;
+      }
+      // Ré-évaluée à chaque requête : retirer un email de ALLOWED_EMAILS
+      // révoque la session JWT immédiatement (sinon accès résiduel ~30 j)
+      if (!isEmailAllowed(token.email)) {
+        return null;
       }
       return token;
     },

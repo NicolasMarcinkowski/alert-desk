@@ -19,10 +19,13 @@ import {
   loadAlertRules,
   type EvaluatorPosition,
 } from "./alert-evaluator";
+import { getUserSymbolKeys } from "./user-symbols";
 import { sseHub } from "./sse-hub";
 
 const REFRESH_SUBSCRIPTIONS_MS = 60_000;
 const POLL_INTERVAL_MS = 30_000;
+/** Coalescence des ticks : un broadcast SSE au plus toutes les 300 ms */
+const SSE_FLUSH_MS = 300;
 const WS_SLOTS = 50;
 
 interface EngineState {
@@ -34,6 +37,11 @@ interface EngineState {
   wsUnsubscribe: (() => void) | null;
   refreshTimer: ReturnType<typeof setInterval> | null;
   pollTimer: ReturnType<typeof setInterval> | null;
+  flushTimer: ReturnType<typeof setInterval> | null;
+  /** Ticks en attente du prochain flush SSE (dernier tick par symbole) */
+  tickBuffer: Map<string, Quote>;
+  /** Re-priming REST quotidien des symboles websocket (prevClose frais) */
+  lastPrimeDayUtc: string | null;
   lastTickAt: number | null;
   lastError: string | null;
 }
@@ -51,6 +59,9 @@ function state(): EngineState {
       wsUnsubscribe: null,
       refreshTimer: null,
       pollTimer: null,
+      flushTimer: null,
+      tickBuffer: new Map(),
+      lastPrimeDayUtc: null,
       lastTickAt: null,
       lastError: null,
     };
@@ -110,6 +121,7 @@ async function collectSubscriptions(): Promise<{
     refs.set(cacheKey(ref), ref);
     evaluatorPositions.push({
       key: cacheKey(ref),
+      brokerAccountId: p.brokerAccountId,
       instrumentId: instr.id,
       quantity: Number(p.quantity),
       avgCost: Number(p.avgCost),
@@ -146,15 +158,23 @@ async function refreshSubscriptions(): Promise<void> {
       : [];
     const wsSymbols = wsCandidates.map((r) => r.symbol);
 
-    // Re-souscription websocket uniquement si le set change
-    if (JSON.stringify(wsSymbols) !== JSON.stringify(s.wsSymbols)) {
+    const wsChanged =
+      JSON.stringify(wsSymbols) !== JSON.stringify(s.wsSymbols);
+    if (wsChanged) {
       s.wsUnsubscribe?.();
       s.wsUnsubscribe =
         finnhub && wsCandidates.length > 0
           ? finnhub.subscribe(wsCandidates, onQuote)
           : null;
       s.wsSymbols = wsSymbols;
-      // Priming REST : le websocket ne pousse pas de prevClose
+    }
+
+    // Priming REST : le websocket ne pousse pas de prevClose — au premier
+    // abonnement ET à chaque nouveau jour UTC (sinon dayChangePct et les
+    // alertes PCT_CHANGE_DAY restent figés sur la clôture du premier jour)
+    const todayUtc = new Date().toISOString().slice(0, 10);
+    if (wsCandidates.length > 0 && (wsChanged || s.lastPrimeDayUtc !== todayUtc)) {
+      s.lastPrimeDayUtc = todayUtc;
       for (const ref of wsCandidates) {
         void fetchQuote(ref).then((q) => q && onQuote(q));
       }
@@ -164,6 +184,13 @@ async function refreshSubscriptions(): Promise<void> {
     s.pollRefs = subs.filter(
       (r) => !wsSet.has(r.symbol) && getProvider(r) !== null
     );
+
+    // Rafraîchit les sets de symboles autorisés des clients SSE connectés
+    for (const userId of sseHub.connectedUserIds()) {
+      void getUserSymbolKeys(userId).then((keys) =>
+        sseHub.setUserSymbols(userId, keys)
+      );
+    }
     s.lastError = null;
   } catch (e) {
     s.lastError = e instanceof Error ? e.message : String(e);
@@ -184,16 +211,23 @@ export function startEngine(): void {
   s.started = true;
   s.startedAt = Date.now();
 
-  // Fan-out SSE + évaluateur d'alertes, branchés une seule fois sur le cache
+  // Branché une seule fois sur le cache : alertes évaluées immédiatement,
+  // ticks coalescés (dernier par symbole) pour le fan-out SSE
   quoteCache.removeAllListeners("quote");
   quoteCache.on("quote", (q: Quote) => {
-    sseHub.broadcast("quote", q);
+    s.tickBuffer.set(q.symbol, q);
     evaluateQuote(q);
   });
 
   void refreshSubscriptions().then(() => pollOnce());
   s.refreshTimer = setInterval(() => void refreshSubscriptions(), REFRESH_SUBSCRIPTIONS_MS);
   s.pollTimer = setInterval(() => void pollOnce(), POLL_INTERVAL_MS);
+  s.flushTimer = setInterval(() => {
+    if (s.tickBuffer.size === 0) return;
+    const batch = [...s.tickBuffer.values()];
+    s.tickBuffer.clear();
+    sseHub.broadcastQuotes(batch);
+  }, SSE_FLUSH_MS);
 
   console.log("[engine] démarré (market data)");
 }

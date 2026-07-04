@@ -8,10 +8,15 @@
  * P&L réalisé = somme des fifoPnlRealized d'IBKR (jamais recalculé).
  * NB : fifoPnlRealized IBKR est hors commissions — le "net" s'obtient en
  * retranchant `commissions` (stockées positives).
+ *
+ * Exécutions MANUAL : pas de P&L broker — il est calculé en méthode PRU
+ * moyen et matérialisé dans fifoPnlRealized (recalculé, ou remis à null si
+ * le fill n'est plus réducteur après une suppression/insertion antidatée).
  */
 
 import { prisma } from "@/lib/db/client";
 import { Prisma } from "@/generated/prisma";
+import { nextAvgCost } from "./avg-cost";
 
 const D = Prisma.Decimal;
 type Decimal = InstanceType<typeof D>;
@@ -30,34 +35,56 @@ interface TripDraft {
   executionIds: string[];
 }
 
+function newTripDraft(
+  openKey: string,
+  direction: "LONG" | "SHORT",
+  openedAt: Date,
+  maxQuantity: Decimal
+): TripDraft {
+  return {
+    openExecutionKey: openKey,
+    direction,
+    openedAt,
+    closedAt: null,
+    maxQuantity,
+    realizedPnl: new D(0),
+    realizedPnlBase: new D(0),
+    commissions: new D(0),
+    allClosesConfirmed: true,
+    hasFifo: false,
+    executionIds: [],
+  };
+}
+
 /**
- * Reconstruit les round-trips d'un compte (tous instruments non-CASH ayant
- * des exécutions). Appelé après chaque import — les corrections tardives
- * IBKR modifient le P&L rétroactivement, on ne cache jamais ces valeurs.
+ * Reconstruit les round-trips d'un compte. Appelé après chaque import ou
+ * saisie/suppression manuelle — les corrections tardives IBKR et les
+ * modifications d'historique changent le P&L rétroactivement, on ne cache
+ * jamais ces valeurs.
  */
 export async function rebuildRoundTrips(accountDbId: string): Promise<void> {
-  const instruments = await prisma.execution.groupBy({
-    by: ["instrumentId"],
+  // Une seule requête pour tout le compte, groupée en mémoire par instrument
+  const allExecutions = await prisma.execution.findMany({
     where: {
       brokerAccountId: accountDbId,
       instrument: { secType: { in: ["STK", "OPT"] } },
     },
+    orderBy: [{ tradeTime: "asc" }, { createdAt: "asc" }],
+    include: { instrument: { select: { multiplier: true } } },
   });
+  const byInstrument = new Map<string, typeof allExecutions>();
+  for (const e of allExecutions) {
+    const list = byInstrument.get(e.instrumentId) ?? [];
+    list.push(e);
+    byInstrument.set(e.instrumentId, list);
+  }
 
-  for (const { instrumentId } of instruments) {
-    const executions = await prisma.execution.findMany({
-      where: { brokerAccountId: accountDbId, instrumentId },
-      orderBy: [{ tradeTime: "asc" }, { createdAt: "asc" }],
-      include: { instrument: { select: { multiplier: true } } },
-    });
-
+  for (const [instrumentId, executions] of byInstrument) {
     const trips: TripDraft[] = [];
     let current: TripDraft | null = null;
     let runningQty = new D(0);
-    // Suivi du PRU moyen — sert au P&L des exécutions MANUAL (pas de
-    // fifoPnlRealized broker pour la saisie manuelle : on le calcule en
-    // méthode PRU moyen et on le matérialise sur l'exécution, ce qui rend
-    // journal/analytics/dashboard identiques pour tous les brokers).
+    // PRU moyen — sert au P&L des exécutions MANUAL (même règle que la
+    // réconciliation des positions, via nextAvgCost)
     let avgCost = new D(0);
 
     for (const e of executions) {
@@ -71,71 +98,57 @@ export async function rebuildRoundTrips(accountDbId: string): Promise<void> {
       const reducing =
         !before.isZero() && before.isNegative() !== signed.isNegative();
 
-      if (e.source === "MANUAL" && reducing) {
-        const reduced = D.min(before.abs(), signed.abs());
-        const dirSign = before.isNegative() ? new D(-1) : new D(1);
-        const pnl = price
-          .minus(avgCost)
-          .times(reduced)
-          .times(multiplier)
-          .times(dirSign);
-        if (e.fifoPnlRealized === null || !new D(e.fifoPnlRealized).equals(pnl)) {
+      if (e.source === "MANUAL") {
+        if (reducing) {
+          const reduced = D.min(before.abs(), signed.abs());
+          const dirSign = before.isNegative() ? new D(-1) : new D(1);
+          const pnl = price
+            .minus(avgCost)
+            .times(reduced)
+            .times(multiplier)
+            .times(dirSign);
+          if (
+            e.fifoPnlRealized === null ||
+            !new D(e.fifoPnlRealized).equals(pnl)
+          ) {
+            await prisma.execution.update({
+              where: { id: e.id },
+              data: { fifoPnlRealized: pnl },
+            });
+          }
+          e.fifoPnlRealized = pnl;
+        } else if (e.fifoPnlRealized !== null) {
+          // Le fill n'est plus réducteur (fill d'ouverture après une
+          // suppression/insertion antidatée) : purger le P&L matérialisé,
+          // sinon il fuit dans le trip comme un P&L fantôme
           await prisma.execution.update({
             where: { id: e.id },
-            data: { fifoPnlRealized: pnl },
+            data: { fifoPnlRealized: null },
           });
+          e.fifoPnlRealized = null;
         }
-        e.fifoPnlRealized = pnl;
       }
 
-      // Mise à jour du PRU moyen (renforcement pondéré / réduction inchangée /
-      // traversée de zéro = prix du fill)
-      if (before.isZero()) {
-        avgCost = price;
-      } else if (!reducing) {
-        avgCost = avgCost
-          .times(before.abs())
-          .plus(price.times(signed.abs()))
-          .div(runningQty.abs());
-      } else if (runningQty.isZero()) {
-        avgCost = new D(0);
-      } else if (before.isNegative() !== runningQty.isNegative()) {
-        avgCost = price;
-      }
+      avgCost = nextAvgCost(before, avgCost, signed, price);
 
       if (before.isZero() && !runningQty.isZero()) {
-        current = {
-          openExecutionKey: e.dedupeKey,
-          direction: runningQty.isNegative() ? "SHORT" : "LONG",
-          openedAt: e.tradeTime,
-          closedAt: null,
-          maxQuantity: runningQty.abs(),
-          realizedPnl: new D(0),
-          realizedPnlBase: new D(0),
-          commissions: new D(0),
-          allClosesConfirmed: true,
-          hasFifo: false,
-          executionIds: [],
-        };
+        current = newTripDraft(
+          e.dedupeKey,
+          runningQty.isNegative() ? "SHORT" : "LONG",
+          e.tradeTime,
+          runningQty.abs()
+        );
         trips.push(current);
       }
-
       if (!current) {
         // Fill orphelin (position issue d'avant l'historique importé) :
         // on ouvre un trip dessus pour ne rien perdre
-        current = {
-          openExecutionKey: e.dedupeKey,
-          direction: signed.isNegative() ? "SHORT" : "LONG",
-          openedAt: e.tradeTime,
-          closedAt: null,
-          maxQuantity: signed.abs(),
-          realizedPnl: new D(0),
-          realizedPnlBase: new D(0),
-          commissions: new D(0),
-          allClosesConfirmed: true,
-          hasFifo: false,
-          executionIds: [],
-        };
+        current = newTripDraft(
+          e.dedupeKey,
+          signed.isNegative() ? "SHORT" : "LONG",
+          e.tradeTime,
+          signed.abs()
+        );
         trips.push(current);
       }
 
@@ -145,7 +158,8 @@ export async function rebuildRoundTrips(accountDbId: string): Promise<void> {
         current.maxQuantity = runningQty.abs();
       }
 
-      const isReducing = !before.isZero() && runningQty.abs().lessThan(before.abs());
+      const isReducing =
+        !before.isZero() && runningQty.abs().lessThan(before.abs());
       if (e.fifoPnlRealized !== null) {
         const fifo = new D(e.fifoPnlRealized);
         if (!fifo.isZero() || isReducing) {
@@ -177,7 +191,8 @@ export async function rebuildRoundTrips(accountDbId: string): Promise<void> {
         realizedPnl: trip.hasFifo ? trip.realizedPnl : null,
         realizedPnlBase: trip.hasFifo ? trip.realizedPnlBase : null,
         commissions: trip.commissions,
-        pnlConfirmed: status === "CLOSED" && trip.allClosesConfirmed && trip.hasFifo,
+        pnlConfirmed:
+          status === "CLOSED" && trip.allClosesConfirmed && trip.hasFifo,
       } as const;
 
       const saved = await prisma.roundTrip.upsert({

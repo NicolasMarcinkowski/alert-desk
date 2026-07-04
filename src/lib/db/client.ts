@@ -5,6 +5,7 @@
  * This pattern ensures we reuse the same client across requests.
  */
 
+import "server-only";
 import { PrismaClient } from "@/generated/prisma";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { Pool } from "pg";

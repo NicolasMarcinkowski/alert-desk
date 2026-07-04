@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { formatDateTime } from "@/lib/utils/format";
 
 export interface BrokerAccountView {
   id: string;
@@ -34,15 +35,6 @@ const STATUS_BADGE: Record<
     className: "text-ink-mute border-edge bg-surface-2",
   },
 };
-
-function formatDateTime(iso: string | null): string {
-  if (!iso) return "jamais";
-  return new Intl.DateTimeFormat("fr-FR", {
-    dateStyle: "short",
-    timeStyle: "short",
-    timeZone: "Europe/Paris",
-  }).format(new Date(iso));
-}
 
 export function BrokerAccountsPanel({
   accounts,
@@ -198,7 +190,7 @@ export function BrokerAccountsPanel({
                         )
                       }
                     >
-                      {busy === `sync:${account.id}` ? "Sync…" : "Sync now"}
+                      {busy === `sync:${account.id}` ? "Sync…" : "Synchroniser"}
                     </button>
                   </>
                 )}
@@ -245,7 +237,7 @@ export function BrokerAccountsPanel({
                     </span>
                   </span>
                   <span className="text-ink-mute">
-                    sync : {formatDateTime(q.lastSuccessAt)}
+                    sync : {q.lastSuccessAt ? formatDateTime(new Date(q.lastSuccessAt)) : "jamais"}
                   </span>
                 </div>
               ))}

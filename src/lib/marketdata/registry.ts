@@ -34,14 +34,18 @@ export function getProvider(ref: SymbolRef): MarketDataProvider | null {
   return registry.providers.find((p) => p.supports(ref)) ?? null;
 }
 
+/** Cascade : premier provider compétent qui répond non-null (Finnhub → Yahoo). */
 export async function fetchQuote(ref: SymbolRef): Promise<Quote | null> {
-  const provider = getProvider(ref);
-  if (!provider) return null;
-  try {
-    return await provider.getQuote(ref);
-  } catch {
-    return null;
+  for (const provider of registry.providers) {
+    if (!provider.supports(ref)) continue;
+    try {
+      const quote = await provider.getQuote(ref);
+      if (quote) return quote;
+    } catch {
+      // provider suivant
+    }
   }
+  return null;
 }
 
 /** Provider Finnhub (websocket + meta) si une clé est configurée. */

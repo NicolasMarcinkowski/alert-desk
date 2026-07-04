@@ -33,6 +33,8 @@ export class FinnhubProvider implements MarketDataProvider {
   constructor(private readonly apiKey: string) {}
 
   supports(ref: SymbolRef): boolean {
+    // Les paires FX "USDEUR=X" sont un format Yahoo — Finnhub ne les connaît pas
+    if (ref.symbol.includes("=")) return false;
     return ref.kind === "STK" && (ref.currency ?? "USD") === "USD";
   }
 

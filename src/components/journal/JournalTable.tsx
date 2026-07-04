@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { STRATEGIES } from "@/lib/strategies";
 import {
   formatDate,
   formatDateTime,
@@ -48,18 +49,6 @@ interface TripDetail {
   instrument: { multiplier: string; secType: string };
 }
 
-const STRATEGIES = [
-  { value: "", label: "— stratégie —" },
-  { value: "wheel", label: "Wheel" },
-  { value: "covered-call", label: "Covered call" },
-  { value: "cash-secured-put", label: "Cash-secured put" },
-  { value: "swing", label: "Swing" },
-  { value: "earnings", label: "Earnings" },
-  { value: "day-trade", label: "Day trade" },
-  { value: "long-terme", label: "Long terme" },
-  { value: "autre", label: "Autre" },
-];
-
 type Filter = "all" | "win" | "loss" | "open";
 
 function holdingLabel(openedAt: string, closedAt: string | null): string {
@@ -78,7 +67,12 @@ function DetailPanel({
   trip: JournalTripView;
   onSaved: () => void;
 }) {
-  const [detail, setDetail] = useState<TripDetail | null>(null);
+  const [panel, setPanel] = useState<
+    | { status: "loading" }
+    | { status: "error" }
+    | { status: "ready"; detail: TripDetail }
+  >({ status: "loading" });
+  const [reloadKey, setReloadKey] = useState(0);
   const [strategy, setStrategy] = useState(trip.strategy ?? "");
   const [tags, setTags] = useState<string[]>(trip.tags);
   const [tagInput, setTagInput] = useState("");
@@ -87,18 +81,51 @@ function DetailPanel({
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
 
-  if (detail === null) {
-    void fetch(`/api/round-trips/${trip.id}`)
-      .then((r) => r.json())
+  // Chargement dans un effet (jamais pendant le render : StrictMode double
+  // les renders, et un re-render du parent relancerait le fetch), avec abort
+  // au démontage et gestion du trip disparu (recalculé après suppression).
+  // L'état "loading" est posé dans les handlers, pas dans l'effet.
+  useEffect(() => {
+    const controller = new AbortController();
+    fetch(`/api/round-trips/${trip.id}`, { signal: controller.signal })
+      .then((res) =>
+        res.ok ? res.json() : Promise.reject(new Error(String(res.status)))
+      )
       .then((data) => {
-        setDetail(data.trip);
+        if (!data.trip) throw new Error("trip absent");
+        setPanel({ status: "ready", detail: data.trip });
         setNotes(data.trip.notes ?? "");
+      })
+      .catch((e: unknown) => {
+        if ((e as Error).name !== "AbortError") setPanel({ status: "error" });
       });
+    return () => controller.abort();
+  }, [trip.id, reloadKey]);
+
+  if (panel.status === "error") {
+    return (
+      <p className="px-8 py-4 text-sm text-ink-mute">
+        Impossible de charger le détail — le trade a peut-être été recalculé.{" "}
+        <button
+          type="button"
+          onClick={() => {
+            setPanel({ status: "loading" });
+            setReloadKey((k) => k + 1);
+          }}
+          className="cursor-pointer text-accent underline"
+        >
+          Réessayer
+        </button>
+      </p>
+    );
+  }
+  if (panel.status === "loading") {
     return (
       <p className="px-8 py-4 text-sm text-ink-mute">Chargement du détail…</p>
     );
   }
 
+  const detail = panel.detail;
   const multiplier = Number(detail.instrument.multiplier);
 
   async function save() {
@@ -178,7 +205,8 @@ function DetailPanel({
                         method: "DELETE",
                       });
                       if (res.ok) {
-                        setDetail(null);
+                        setPanel({ status: "loading" });
+                        setReloadKey((k) => k + 1);
                         onSaved();
                       }
                     }}
@@ -257,6 +285,7 @@ function DetailPanel({
             onChange={(e) => setStrategy(e.target.value)}
             className={inputClass}
           >
+            <option value="">— stratégie —</option>
             {STRATEGIES.map((s) => (
               <option key={s.value} value={s.value}>
                 {s.label}

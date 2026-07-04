@@ -77,6 +77,11 @@ function mapPutCall(raw: string | undefined): FlexPutCall | undefined {
 
 function mapBuySell(raw: string | undefined): FlexBuySell | undefined {
   if (!raw) return undefined;
+  // Lignes d'annulation IBKR ("BUY (Ca.)" / "SELL (Ca.)") : quantité inverse
+  // qui matérialise un bust — les importer comme fills normaux doublerait la
+  // position au lieu de l'annuler. On les ignore ; le relevé Activity du
+  // lendemain reflète l'état corrigé.
+  if (raw.includes("(Ca")) return undefined;
   if (raw.startsWith("BUY")) return "BUY";
   if (raw.startsWith("SELL")) return "SELL";
   return undefined;

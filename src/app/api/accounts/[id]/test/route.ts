@@ -1,7 +1,11 @@
 import { prisma } from "@/lib/db/client";
 import { open } from "@/lib/crypto";
 import { FlexError, validateFlexQuery } from "@/lib/flex/client";
-import { requireSession, unauthorized } from "@/lib/api/validation";
+import {
+  badRequest,
+  requireSession,
+  unauthorized,
+} from "@/lib/api/validation";
 
 /** Dry-run SendRequest sur chaque query du compte (sans télécharger le relevé). */
 export async function POST(
@@ -19,10 +23,7 @@ export async function POST(
   if (!account) return unauthorized();
 
   if (account.broker !== "IBKR" || !account.flexTokenEncrypted) {
-    return Response.json(
-      { error: "Compte manuel — rien à tester" },
-      { status: 400 }
-    );
+    return badRequest("Compte manuel — rien à tester");
   }
   const token = open(account.flexTokenEncrypted);
   const results: { queryId: string; type: string; ok: boolean; error?: string }[] =

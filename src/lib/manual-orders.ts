@@ -12,6 +12,7 @@
 
 import { randomUUID } from "crypto";
 import { prisma } from "@/lib/db/client";
+import { buildOccSymbol } from "@/lib/occ";
 import { reconcilePositions } from "@/lib/sync/reconcile";
 import { rebuildRoundTrips } from "@/lib/sync/round-trips";
 import { requestSubscriptionRefresh } from "@/lib/engine/runtime";
@@ -53,11 +54,12 @@ function buildOcc(input: ManualOrderInput): string | null {
   ) {
     return null;
   }
-  const [y, m, d] = input.expiry.split("-");
-  const strike = Math.round(input.strike * 1000)
-    .toString()
-    .padStart(8, "0");
-  return `${input.symbol}${y.slice(2)}${m}${d}${input.putCall.charAt(0)}${strike}`;
+  return buildOccSymbol(
+    input.symbol.trim().toUpperCase(),
+    input.expiry,
+    input.strike,
+    input.putCall
+  );
 }
 
 async function resolveAccount(userId: string, accountId?: string) {

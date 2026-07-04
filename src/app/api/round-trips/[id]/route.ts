@@ -1,20 +1,10 @@
 import { prisma } from "@/lib/db/client";
+import { STRATEGY_VALUES } from "@/lib/strategies";
 import {
   badRequest,
   requireSession,
   unauthorized,
 } from "@/lib/api/validation";
-
-const STRATEGIES = [
-  "wheel",
-  "covered-call",
-  "cash-secured-put",
-  "swing",
-  "earnings",
-  "day-trade",
-  "long-terme",
-  "autre",
-];
 
 export async function GET(
   _request: Request,
@@ -74,7 +64,7 @@ export async function PATCH(
   if ("strategy" in body) {
     const s = body.strategy;
     if (s === null || s === "") data.strategy = null;
-    else if (typeof s === "string" && STRATEGIES.includes(s)) data.strategy = s;
+    else if (typeof s === "string" && STRATEGY_VALUES.includes(s)) data.strategy = s;
     else return badRequest("stratégie invalide");
   }
   if ("tags" in body) {

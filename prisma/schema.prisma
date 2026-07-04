@@ -220,7 +220,7 @@ model AlertRule {
   createdAt       DateTime      @default(now()) @map("created_at")
 
   user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
-  ibkrAccount BrokerAccount? @relation(fields: [brokerAccountId], references: [id], onDelete: Cascade)
+  account     BrokerAccount? @relation(fields: [brokerAccountId], references: [id], onDelete: Cascade)
   instrument  Instrument?  @relation(fields: [instrumentId], references: [id], onDelete: Cascade)
   events      AlertEvent[]
 

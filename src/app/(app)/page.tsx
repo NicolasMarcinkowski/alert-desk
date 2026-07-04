@@ -95,7 +95,7 @@ export default async function DashboardPage() {
         <KpiTile
           label="Frais MTD"
           value={data.feesMtdBase > 0 ? formatMoney(data.feesMtdBase, ccy) : "—"}
-          sub="commissions IBKR"
+          sub="commissions"
         />
       </div>
 
@@ -143,8 +143,8 @@ export default async function DashboardPage() {
 
       <div className="mt-4 grid gap-4 lg:grid-cols-2">
         <Card
-          title="Dernières exécutions IBKR"
-          subtitle="Importées via Flex (Trade Confirms ~10 min après le fill)"
+          title="Dernières exécutions"
+          subtitle="Saisies manuellement ou importées du broker (~10 min après le fill)"
         >
           {data.recentExecutions.length === 0 ? (
             <p className="py-8 text-center text-sm text-ink-mute">
@@ -158,13 +158,7 @@ export default async function DashboardPage() {
                   className="flex items-center justify-between py-2 text-sm"
                 >
                   <div className="flex items-center gap-3">
-                    <span
-                      className={`w-12 rounded px-1.5 py-px text-center text-[10px] font-semibold ${
-                        e.side === "BUY"
-                          ? "bg-surface-2 text-ink-soft"
-                          : "bg-surface-2 text-ink-soft"
-                      }`}
-                    >
+                    <span className="w-12 rounded bg-surface-2 px-1.5 py-px text-center text-[10px] font-semibold text-ink-soft">
                       {e.side === "BUY" ? "ACHAT" : "VENTE"}
                     </span>
                     <span className="font-mono text-[13px]">{e.symbol}</span>

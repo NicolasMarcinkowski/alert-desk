@@ -11,6 +11,7 @@
 
 import { prisma } from "@/lib/db/client";
 import { Prisma } from "@/generated/prisma";
+import { nextAvgCost } from "./avg-cost";
 
 const D = Prisma.Decimal;
 type Decimal = InstanceType<typeof D>;
@@ -22,38 +23,6 @@ interface WorkingPosition {
   currency: string;
   fxRateToBase: Decimal;
   touchedIntraday: boolean;
-}
-
-/** Applique un fill signé sur (qty, avgCost) — PRU pondéré à l'augmentation,
- *  PRU conservé à la réduction, PRU = prix du fill en cas de traversée de zéro. */
-function applyFill(
-  pos: { quantity: Decimal; avgCost: Decimal },
-  signedQty: Decimal,
-  price: Decimal
-): { quantity: Decimal; avgCost: Decimal } {
-  const newQty = pos.quantity.plus(signedQty);
-  const sameDirection =
-    pos.quantity.isZero() || pos.quantity.isNegative() === signedQty.isNegative();
-
-  if (pos.quantity.isZero()) {
-    return { quantity: newQty, avgCost: price };
-  }
-  if (sameDirection) {
-    // Renforcement : moyenne pondérée
-    const totalCost = pos.avgCost
-      .times(pos.quantity.abs())
-      .plus(price.times(signedQty.abs()));
-    return { quantity: newQty, avgCost: totalCost.div(newQty.abs()) };
-  }
-  if (newQty.isZero()) {
-    return { quantity: newQty, avgCost: new D(0) };
-  }
-  if (pos.quantity.isNegative() === newQty.isNegative()) {
-    // Réduction partielle : PRU inchangé
-    return { quantity: newQty, avgCost: pos.avgCost };
-  }
-  // Traversée de zéro : le résidu part au prix du fill
-  return { quantity: newQty, avgCost: price };
 }
 
 export interface ReconcileResult {
@@ -70,6 +39,7 @@ export async function reconcilePositions(
   accountDbId: string
 ): Promise<ReconcileResult> {
   const warnings: string[] = [];
+  const driftInstrumentIds = new Set<string>();
 
   const latestSnapshot = await prisma.positionSnapshot.findFirst({
     where: { brokerAccountId: accountDbId },
@@ -104,17 +74,19 @@ export async function reconcilePositions(
       select: { date: true },
     });
     if (prevSnapshot) {
-      const prevRows = await prisma.positionSnapshot.findMany({
-        where: { brokerAccountId: accountDbId, date: prevSnapshot.date },
-        select: { instrumentId: true, quantity: true },
-      });
-      const fills = await prisma.execution.findMany({
-        where: {
-          brokerAccountId: accountDbId,
-          tradeDate: { gt: prevSnapshot.date, lte: snapshotDate },
-        },
-        select: { instrumentId: true, side: true, quantity: true },
-      });
+      const [prevRows, fills] = await Promise.all([
+        prisma.positionSnapshot.findMany({
+          where: { brokerAccountId: accountDbId, date: prevSnapshot.date },
+          select: { instrumentId: true, quantity: true },
+        }),
+        prisma.execution.findMany({
+          where: {
+            brokerAccountId: accountDbId,
+            tradeDate: { gt: prevSnapshot.date, lte: snapshotDate },
+          },
+          select: { instrumentId: true, side: true, quantity: true },
+        }),
+      ]);
       const expected = new Map<string, Decimal>();
       for (const r of prevRows) {
         expected.set(r.instrumentId, new D(r.quantity));
@@ -130,20 +102,26 @@ export async function reconcilePositions(
       for (const [instrumentId, expQty] of expected) {
         const actual = working.get(instrumentId)?.quantity ?? new D(0);
         if (!actual.equals(expQty)) {
-          const instr = await prisma.instrument.findUnique({
-            where: { id: instrumentId },
-            select: { symbol: true },
-          });
+          driftInstrumentIds.add(instrumentId);
+        }
+      }
+      if (driftInstrumentIds.size > 0) {
+        // Une seule requête pour les libellés des avertissements
+        const instruments = await prisma.instrument.findMany({
+          where: { id: { in: [...driftInstrumentIds] } },
+          select: { id: true, symbol: true },
+        });
+        const symbolById = new Map(instruments.map((i) => [i.id, i.symbol]));
+        for (const instrumentId of driftInstrumentIds) {
+          const expQty = expected.get(instrumentId) ?? new D(0);
+          const actual = working.get(instrumentId)?.quantity ?? new D(0);
           warnings.push(
-            `Dérive ${instr?.symbol ?? instrumentId} : attendu ${expQty} (snapshot précédent + fills), snapshot ${actual}`
+            `Dérive ${symbolById.get(instrumentId) ?? instrumentId} : attendu ${expQty} (snapshot précédent + fills), snapshot ${actual}`
           );
         }
       }
     }
   }
-  const driftInstruments = new Set(
-    warnings.map((w) => w.split(" ")[1]).filter(Boolean)
-  );
 
   // 3. Fills intraday (postérieurs au snapshot) par-dessus la base
   const intradayFills = await prisma.execution.findMany({
@@ -152,7 +130,6 @@ export async function reconcilePositions(
       ...(snapshotDate ? { tradeDate: { gt: snapshotDate } } : {}),
     },
     orderBy: { tradeTime: "asc" },
-    include: { instrument: { select: { currency: true } } },
   });
 
   for (const f of intradayFills) {
@@ -165,11 +142,11 @@ export async function reconcilePositions(
       fxRateToBase: new D(f.fxRateToBase),
       touchedIntraday: false,
     };
-    const next = applyFill(current, signed, new D(f.price));
+    const price = new D(f.price);
     working.set(f.instrumentId, {
       ...current,
-      quantity: next.quantity,
-      avgCost: next.avgCost,
+      quantity: current.quantity.plus(signed),
+      avgCost: nextAvgCost(current.quantity, current.avgCost, signed, price),
       fxRateToBase: new D(f.fxRateToBase),
       touchedIntraday: true,
     });
@@ -180,10 +157,17 @@ export async function reconcilePositions(
   for (const pos of working.values()) {
     if (pos.quantity.isZero()) continue;
     keptInstrumentIds.push(pos.instrumentId);
-    const instr = await prisma.instrument.findUnique({
-      where: { id: pos.instrumentId },
-      select: { symbol: true },
-    });
+    const data = {
+      quantity: pos.quantity,
+      avgCost: pos.avgCost,
+      currency: pos.currency,
+      fxRateToBase: pos.fxRateToBase,
+      state: pos.touchedIntraday
+        ? ("INTRADAY_ESTIMATED" as const)
+        : ("SNAPSHOT_CONFIRMED" as const),
+      snapshotDate,
+      driftDetected: driftInstrumentIds.has(pos.instrumentId),
+    };
     await prisma.position.upsert({
       where: {
         brokerAccountId_instrumentId: {
@@ -194,23 +178,9 @@ export async function reconcilePositions(
       create: {
         brokerAccountId: accountDbId,
         instrumentId: pos.instrumentId,
-        quantity: pos.quantity,
-        avgCost: pos.avgCost,
-        currency: pos.currency,
-        fxRateToBase: pos.fxRateToBase,
-        state: pos.touchedIntraday ? "INTRADAY_ESTIMATED" : "SNAPSHOT_CONFIRMED",
-        snapshotDate,
-        driftDetected: instr ? driftInstruments.has(instr.symbol) : false,
+        ...data,
       },
-      update: {
-        quantity: pos.quantity,
-        avgCost: pos.avgCost,
-        currency: pos.currency,
-        fxRateToBase: pos.fxRateToBase,
-        state: pos.touchedIntraday ? "INTRADAY_ESTIMATED" : "SNAPSHOT_CONFIRMED",
-        snapshotDate,
-        driftDetected: instr ? driftInstruments.has(instr.symbol) : false,
-      },
+      update: data,
     });
   }
 

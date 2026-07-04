@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
+import { NAV_MOBILE_MORE, isNavActive } from "./nav-links";
 
 const iconProps = {
   width: 20,
@@ -60,16 +61,10 @@ const ITEMS = [
   },
 ];
 
-const MORE_ITEMS = [
-  { href: "/watchlist", label: "Watchlist" },
-  { href: "/analytics", label: "Analytics" },
-  { href: "/reglages", label: "Réglages" },
-];
-
 export function MobileNav({ alertCount = 0 }: { alertCount?: number }) {
   const pathname = usePathname();
   const [moreOpen, setMoreOpen] = useState(false);
-  const moreActive = MORE_ITEMS.some((i) => pathname.startsWith(i.href));
+  const moreActive = NAV_MOBILE_MORE.some((i) => pathname.startsWith(i.href));
 
   return (
     <>
@@ -82,7 +77,7 @@ export function MobileNav({ alertCount = 0 }: { alertCount?: number }) {
             className="absolute bottom-16 left-3 right-3 rounded-xl border border-edge bg-surface p-2 shadow-xl"
             onClick={(e) => e.stopPropagation()}
           >
-            {MORE_ITEMS.map((item) => (
+            {NAV_MOBILE_MORE.map((item) => (
               <Link
                 key={item.href}
                 href={item.href}
@@ -102,10 +97,7 @@ export function MobileNav({ alertCount = 0 }: { alertCount?: number }) {
 
       <nav className="fixed inset-x-0 bottom-0 z-40 flex border-t border-edge bg-surface/95 backdrop-blur lg:hidden">
         {ITEMS.map((item) => {
-          const active =
-            item.href === "/"
-              ? pathname === "/"
-              : pathname.startsWith(item.href);
+          const active = isNavActive(item.href, pathname);
           return (
             <Link
               key={item.href}

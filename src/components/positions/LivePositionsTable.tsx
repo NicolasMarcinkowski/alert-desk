@@ -1,5 +1,6 @@
 "use client";
 
+import { Fragment } from "react";
 import { useLiveQuotes } from "@/hooks/useLiveQuotes";
 import { FreshnessBadge, type Freshness } from "@/components/ui/FreshnessBadge";
 import {
@@ -168,9 +169,8 @@ export function LivePositionsTable({
         </thead>
         <tbody>
           {computed.map((group) => (
-            <>
+            <Fragment key={group.underlying}>
               <tr
-                key={group.underlying}
                 className="border-b border-edge-soft bg-surface-2/40"
               >
                 <td className="px-5 py-2 font-semibold">
@@ -254,7 +254,7 @@ export function LivePositionsTable({
                   </td>
                 </tr>
               ))}
-            </>
+            </Fragment>
           ))}
         </tbody>
         <tfoot>

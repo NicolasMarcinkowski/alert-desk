@@ -6,36 +6,6 @@ import {
   unauthorized,
 } from "@/lib/api/validation";
 
-export async function GET() {
-  const session = await requireSession();
-  if (!session) return unauthorized();
-
-  const accounts = await prisma.brokerAccount.findMany({
-    where: { userId: session.user.id },
-    orderBy: { createdAt: "asc" },
-    select: {
-      id: true,
-      label: true,
-      broker: true,
-      externalAccountId: true,
-      baseCurrency: true,
-      status: true,
-      createdAt: true,
-      flexQueries: {
-        select: {
-          id: true,
-          queryId: true,
-          type: true,
-          enabled: true,
-          lastRunAt: true,
-          lastSuccessAt: true,
-        },
-      },
-    },
-  });
-  return Response.json({ accounts });
-}
-
 export async function POST(request: Request) {
   const session = await requireSession();
   if (!session) return unauthorized();
@@ -52,7 +22,7 @@ export async function POST(request: Request) {
     typeof body?.queryIdActivity === "string" ? body.queryIdActivity.trim() : "";
   const baseCurrency = body?.baseCurrency === "USD" ? "USD" : "EUR";
 
-  if (!label) return badRequest("label requis");
+  if (!label || label.length > 60) return badRequest("label requis (max 60 caractères)");
   if (!flexToken) return badRequest("flexToken requis");
   if (!queryIdTradeConfirms && !queryIdActivity) {
     return badRequest("au moins un query ID requis");

@@ -12,6 +12,7 @@
 
 import { createHash } from "crypto";
 import { prisma } from "@/lib/db/client";
+import { buildOccSymbol } from "@/lib/occ";
 import type {
   CashTransactionType,
   ExecutionSource,
@@ -42,8 +43,7 @@ export function emptyCounters(): ImportCounters {
   return { fetched: 0, inserted: 0, updated: 0, duplicates: 0 };
 }
 
-/** Format OCC compact (celui des fournisseurs de quotes) : AAPL260721C00190000 */
-function buildOccSymbol(ref: FlexInstrumentRef): string | undefined {
+function occFromRef(ref: FlexInstrumentRef): string | undefined {
   if (
     ref.assetCategory !== "OPT" ||
     !ref.underlyingSymbol ||
@@ -53,11 +53,7 @@ function buildOccSymbol(ref: FlexInstrumentRef): string | undefined {
   ) {
     return undefined;
   }
-  const [y, m, d] = ref.expiry.split("-");
-  const strikeThousandths = Math.round(Number(ref.strike) * 1000)
-    .toString()
-    .padStart(8, "0");
-  return `${ref.underlyingSymbol}${y.slice(2)}${m}${d}${ref.putCall.charAt(0)}${strikeThousandths}`;
+  return buildOccSymbol(ref.underlyingSymbol, ref.expiry, ref.strike, ref.putCall);
 }
 
 export function buildDedupeKey(accountDbId: string, t: FlexTradeRow): string {
@@ -105,7 +101,7 @@ export async function ensureInstrument(
     strike: ref.strike,
     expiry: ref.expiry ? new Date(`${ref.expiry}T00:00:00Z`) : undefined,
     putCall: ref.putCall,
-    occSymbol: buildOccSymbol(ref),
+    occSymbol: occFromRef(ref),
     exchange: ref.exchange,
     isin: ref.isin,
   };
@@ -170,10 +166,18 @@ async function importTrades(
       });
       counters.inserted++;
     } else if (source === "ACTIVITY") {
-      // Activity = enregistrement corrigé et autoritaire
+      // Activity = enregistrement corrigé et autoritaire — écrase TOUT
+      // ce qui peut être restaté (prix/quantité corrigés, pas que les frais)
       await prisma.execution.update({
         where: { id: existing.id },
         data: {
+          quantity: t.quantity,
+          price: t.price,
+          proceeds: t.proceeds ?? "0",
+          tradeTime: t.tradeTimeUtc,
+          settleDate: t.settleDate
+            ? new Date(`${t.settleDate}T00:00:00Z`)
+            : undefined,
           commission: t.commission,
           commissionCurrency: t.commissionCurrency,
           openCloseCode: t.openCloseCode,

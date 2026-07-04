@@ -10,29 +10,6 @@ const PRICE_TYPES = ["PRICE_ABOVE", "PRICE_BELOW", "PCT_CHANGE_DAY"] as const;
 const POSITION_TYPES = ["POSITION_PNL_ABOVE", "POSITION_PNL_BELOW"] as const;
 const REARM_MODES = ["MANUAL", "AUTO_ON_RECROSS", "AUTO_AFTER_COOLDOWN"] as const;
 
-export async function GET() {
-  const session = await requireSession();
-  if (!session) return unauthorized();
-
-  const rules = await prisma.alertRule.findMany({
-    where: { userId: session.user.id },
-    orderBy: { createdAt: "desc" },
-    include: {
-      instrument: {
-        select: {
-          symbol: true,
-          underlyingSymbol: true,
-          expiry: true,
-          strike: true,
-          putCall: true,
-          secType: true,
-        },
-      },
-    },
-  });
-  return Response.json({ rules });
-}
-
 export async function POST(request: Request) {
   const session = await requireSession();
   if (!session) return unauthorized();
@@ -46,9 +23,16 @@ export async function POST(request: Request) {
   if (!isPrice && !isPosition) return badRequest("type d'alerte invalide");
 
   const threshold = Number(body.threshold);
-  if (!Number.isFinite(threshold)) return badRequest("seuil invalide");
+  // Bornes Decimal(18,6) : au-delà, Prisma jette un 500
+  if (!Number.isFinite(threshold) || Math.abs(threshold) >= 1e12) {
+    return badRequest("seuil invalide");
+  }
 
-  const cooldownSeconds = Number(body.cooldownSeconds) || 900;
+  const cooldownRaw = Number(body.cooldownSeconds);
+  // Un cooldown négatif ou nul contournerait l'anti-spam du réarmement
+  const cooldownSeconds = Number.isInteger(cooldownRaw)
+    ? Math.min(Math.max(cooldownRaw, 60), 86_400)
+    : 900;
   const rearmMode = (REARM_MODES as readonly string[]).includes(body.rearmMode)
     ? body.rearmMode
     : "AUTO_ON_RECROSS";
