@@ -157,6 +157,7 @@ export const getHeaderStats = cache(async function getHeaderStats(
     }),
     prisma.brokerAccount.findFirst({
       where: { id: { in: accountIds } },
+      orderBy: { createdAt: "asc" }, // devise d'affichage déterministe
       select: { baseCurrency: true },
     }),
   ]);

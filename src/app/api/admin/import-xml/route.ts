@@ -28,6 +28,13 @@ export async function POST(request: Request) {
     where: { id: accountId },
   });
   if (!account) return badRequest("compte inconnu");
+  // Invariant 5 : jamais de snapshot IBKR sur un compte MANUAL (il écraserait
+  // la réconciliation des ordres saisis à la main).
+  if (account.broker !== "IBKR") {
+    return badRequest(
+      "L'import de relevé ne s'applique qu'aux comptes IBKR (pas aux comptes manuels)"
+    );
+  }
 
   try {
     const result = await processStatementXml(

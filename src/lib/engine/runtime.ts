@@ -33,6 +33,8 @@ interface EngineState {
   startedAt: number | null;
   subscriptions: SymbolRef[];
   wsSymbols: string[];
+  /** Symboles WS ayant réellement produit un tick Finnhub (sinon pollés) */
+  wsAlive: Set<string>;
   pollRefs: SymbolRef[];
   wsUnsubscribe: (() => void) | null;
   refreshTimer: ReturnType<typeof setInterval> | null;
@@ -44,6 +46,8 @@ interface EngineState {
   lastPrimeDayUtc: string | null;
   lastTickAt: number | null;
   lastError: string | null;
+  /** Verrou anti-chevauchement du polling REST (cycle > intervalle) */
+  polling: boolean;
 }
 
 const globalRef = globalThis as unknown as { __alertDeskEngine?: EngineState };
@@ -55,6 +59,7 @@ function state(): EngineState {
       startedAt: null,
       subscriptions: [],
       wsSymbols: [],
+      wsAlive: new Set(),
       pollRefs: [],
       wsUnsubscribe: null,
       refreshTimer: null,
@@ -64,6 +69,7 @@ function state(): EngineState {
       lastPrimeDayUtc: null,
       lastTickAt: null,
       lastError: null,
+      polling: false,
     };
   }
   return globalRef.__alertDeskEngine;
@@ -72,6 +78,12 @@ function state(): EngineState {
 function onQuote(quote: Quote): void {
   const s = state();
   s.lastTickAt = Date.now();
+  // Un tick/priming Finnhub prouve que le symbole WS est réellement servi ;
+  // sinon (ex. place non-US que Finnhub ignore) il reste dans le poll de
+  // secours et n'est jamais figé.
+  if (quote.source === "finnhub" && s.wsSymbols.includes(quote.symbol)) {
+    s.wsAlive.add(quote.symbol);
+  }
   quoteCache.set(quote);
 }
 
@@ -167,6 +179,9 @@ async function refreshSubscriptions(): Promise<void> {
           ? finnhub.subscribe(wsCandidates, onQuote)
           : null;
       s.wsSymbols = wsSymbols;
+      // Oublie les symboles retirés ; les nouveaux devront re-prouver un tick.
+      const nextSet = new Set(wsSymbols);
+      s.wsAlive = new Set([...s.wsAlive].filter((sym) => nextSet.has(sym)));
     }
 
     // Priming REST : le websocket ne pousse pas de prevClose — au premier
@@ -181,8 +196,12 @@ async function refreshSubscriptions(): Promise<void> {
     }
 
     const wsSet = new Set(wsSymbols);
+    // Poll REST : tout ce qui n'est pas WS, PLUS les symboles WS pas encore
+    // confirmés par un tick Finnhub (secours contre les symboles jamais servis).
     s.pollRefs = subs.filter(
-      (r) => !wsSet.has(r.symbol) && getProvider(r) !== null
+      (r) =>
+        (!wsSet.has(r.symbol) || !s.wsAlive.has(r.symbol)) &&
+        getProvider(r) !== null
     );
 
     // Rafraîchit les sets de symboles autorisés des clients SSE connectés
@@ -199,9 +218,17 @@ async function refreshSubscriptions(): Promise<void> {
 
 async function pollOnce(): Promise<void> {
   const s = state();
-  for (const ref of s.pollRefs) {
-    const quote = await fetchQuote(ref);
-    if (quote) onQuote(quote);
+  // Anti-chevauchement : si le cycle précédent (derrière le rate limiter)
+  // dépasse POLL_INTERVAL_MS, on saute ce tick au lieu d'empiler des cycles.
+  if (s.polling) return;
+  s.polling = true;
+  try {
+    for (const ref of s.pollRefs) {
+      const quote = await fetchQuote(ref);
+      if (quote) onQuote(quote);
+    }
+  } finally {
+    s.polling = false;
   }
 }
 

@@ -1,8 +1,16 @@
+# Rotation des logs commune aux deux services (json-file illimité par défaut)
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
   app:
     image: ghcr.io/nicolasmarcinkowski/alert-desk:latest
     container_name: alert-desk-app
     restart: unless-stopped
+    logging: *default-logging
     ports:
       - "3020:3000"
     env_file:
@@ -14,15 +22,26 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    healthcheck:
+      # /login est public (voir proxy.ts) et rendu par Next → l'app répond
+      test:
+        ["CMD-SHELL", "wget -q -O /dev/null http://localhost:3000/login || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 40s
 
   db:
     image: postgres:18-alpine
     container_name: alert-desk-db
     restart: unless-stopped
+    logging: *default-logging
     env_file:
       - .env
     volumes:
-      - ./data/postgres:/var/lib/postgresql/data
+      # Postgres 18+ : monter /var/lib/postgresql (les données vont dans un
+      # sous-dossier versionné 18/docker, requis pour pg_upgrade --link)
+      - ./data/postgres:/var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 10s

@@ -224,7 +224,19 @@ async function fire(rule: RuleRuntime, value: number): Promise<void> {
     triggeredAt: event.triggeredAt.toISOString(),
   });
 
-  // Notification APRÈS l'écriture d'état
+  // État FINAL écrit AVANT le dispatch : l'envoi peut être long (retries,
+  // canal muet) et un crash/redéploiement pendant cette fenêtre laisserait
+  // sinon une règle AUTO bloquée en TRIGGERED pour toujours (jamais réévaluée).
+  // Invariant 4 respecté : la notification part APRÈS l'écriture d'état.
+  if (rule.rearmMode !== "MANUAL") {
+    await prisma.alertRule.update({
+      where: { id: rule.id },
+      data: { state: "COOLDOWN" },
+    });
+    rule.state = "COOLDOWN";
+    state().recrossSeen.delete(rule.id);
+  }
+
   const deliveries = await dispatchToUser(
     rule.userId,
     { telegram: rule.notifyTelegram, discord: rule.notifyDiscord },
@@ -234,15 +246,6 @@ async function fire(rule: RuleRuntime, value: number): Promise<void> {
     where: { id: event.id },
     data: { deliveries: deliveries as Prisma.InputJsonValue },
   });
-
-  if (rule.rearmMode !== "MANUAL") {
-    await prisma.alertRule.update({
-      where: { id: rule.id },
-      data: { state: "COOLDOWN" },
-    });
-    rule.state = "COOLDOWN";
-    state().recrossSeen.delete(rule.id);
-  }
 }
 
 async function evaluateRule(rule: RuleRuntime, quote: Quote): Promise<void> {

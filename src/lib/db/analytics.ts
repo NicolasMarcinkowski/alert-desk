@@ -40,6 +40,9 @@ function periodStart(period: AnalyticsPeriod, now = new Date()): Date | null {
 
 export interface AnalyticsData {
   baseCurrency: string;
+  /** Vrai si l'utilisateur a des comptes dans plusieurs devises de base :
+   * seuls ceux en `baseCurrency` sont agrégés (les autres sont exclus). */
+  mixedBaseCurrencies: boolean;
   kpis: {
     netRealized: number;
     winRate: number | null;
@@ -71,9 +74,18 @@ export async function getAnalytics(
   const accounts = await prisma.brokerAccount.findMany({
     where: { userId },
     select: { id: true, baseCurrency: true },
+    orderBy: { createdAt: "asc" }, // devise d'affichage déterministe
   });
-  const accountIds = accounts.map((a) => a.id);
+  // On n'additionne JAMAIS des montants de devises de base différentes.
+  // Devise d'affichage = celle du compte le plus ancien ; les comptes d'une
+  // autre devise sont exclus et signalés (mixedBaseCurrencies) plutôt que
+  // sommés à tort. Conversion base-à-base = piste v2 (couche FX d'affichage).
   const baseCurrency = accounts[0]?.baseCurrency ?? "EUR";
+  const mixedBaseCurrencies =
+    new Set(accounts.map((a) => a.baseCurrency)).size > 1;
+  const accountIds = accounts
+    .filter((a) => a.baseCurrency === baseCurrency)
+    .map((a) => a.id);
 
   // Round-trips clôturés dans la période, avec leurs exécutions
   const trips = await prisma.roundTrip.findMany({
@@ -195,6 +207,7 @@ export async function getAnalytics(
 
   return {
     baseCurrency,
+    mixedBaseCurrencies,
     kpis: {
       netRealized,
       winRate: nets.length > 0 ? (wins.length / nets.length) * 100 : null,

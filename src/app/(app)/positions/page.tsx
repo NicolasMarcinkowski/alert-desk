@@ -39,14 +39,14 @@ export default async function PositionsPage() {
       <div className="flex items-start justify-between gap-3">
         <PageTitle
           title="Positions"
-          subtitle="Saisie manuelle ou import IBKR — cours live ou différés, badge de fraîcheur par ligne"
+          subtitle="Saisie manuelle ou import courtier — cours live ou différés, badge de fraîcheur par ligne"
         />
         <AddOrderButton />
       </div>
 
       {hasDrift && (
         <p className="mb-4 rounded-lg border border-warn/40 bg-warn/10 px-4 py-2.5 text-sm text-warn">
-          Dérive détectée entre snapshot IBKR et fills importés sur certaines
+          Dérive détectée entre le relevé du courtier et les fills importés sur certaines
           positions — le snapshot fait foi, vérifie le détail de sync dans les
           réglages.
         </p>
@@ -56,7 +56,7 @@ export default async function PositionsPage() {
         <Card>
           <p className="py-10 text-center text-sm text-ink-mute">
             Aucune position ouverte. Ajoute ton premier ordre avec le bouton
-            ci-dessus, ou relie un compte IBKR dans les réglages.
+            ci-dessus, ou connecte ta plateforme dans les réglages.
           </p>
         </Card>
       ) : (

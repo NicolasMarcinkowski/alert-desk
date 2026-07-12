@@ -83,7 +83,7 @@ export default async function JournalPage() {
         <Card>
           <p className="py-10 text-center text-sm text-ink-mute">
             Aucun trade pour l&apos;instant. Ajoute ton premier ordre avec le
-            bouton ci-dessus, ou relie un compte IBKR dans les réglages.
+            bouton ci-dessus, ou connecte ta plateforme dans les réglages.
           </p>
         </Card>
       ) : (

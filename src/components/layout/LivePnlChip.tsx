@@ -2,7 +2,11 @@
 
 import { useLiveQuotes } from "@/hooks/useLiveQuotes";
 import type { LivePositionLite } from "@/lib/db/queries";
-import { FreshnessBadge, type Freshness } from "@/components/ui/FreshnessBadge";
+import {
+  FreshnessBadge,
+  isQuoteStale,
+  type Freshness,
+} from "@/components/ui/FreshnessBadge";
 import { formatSignedMoney } from "@/lib/utils/format";
 
 /**
@@ -21,19 +25,30 @@ export function LivePnlChip({
   positions: LivePositionLite[];
   currency: string;
 }) {
-  const { quotes } = useLiveQuotes();
+  const { quotes, connected } = useLiveQuotes();
 
   let latent: number | null = null;
-  let freshness: Freshness | null = null;
+  let anyLive = false;
+  let anyRecent = false;
   for (const p of positions) {
     const quote = quotes[p.key];
     if (!quote) continue;
     latent =
       (latent ?? 0) +
       (quote.last - p.avgCost) * p.quantity * p.multiplier * p.fxRateToBase;
-    if (!quote.delayed) freshness = "live";
-    else if (freshness !== "live") freshness = "delayed";
+    const recent = !isQuoteStale(quote.ts);
+    if (recent) anyRecent = true;
+    if (recent && !quote.delayed) anyLive = true;
   }
+  // Figé si SSE coupé ou aucune cotation récente (marché fermé / week-end)
+  const freshness: Freshness | null =
+    latent === null
+      ? null
+      : !connected || !anyRecent
+        ? "stale"
+        : anyLive
+          ? "live"
+          : "delayed";
 
   const pnlClass = (v: number) => (v >= 0 ? "text-gain" : "text-loss");
 

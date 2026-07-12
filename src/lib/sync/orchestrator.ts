@@ -107,20 +107,47 @@ export async function processStatementXml(
     where: { id: accountDbId },
   });
 
-  for (const statement of statements) {
-    // Apprentissage / contrôle du n° de compte côté broker
-    if (!account.externalAccountId) {
-      await prisma.brokerAccount.update({
-        where: { id: accountDbId },
-        data: { externalAccountId: statement.accountId },
-      });
-      account.externalAccountId = statement.accountId;
-    } else if (account.externalAccountId !== statement.accountId) {
+  // Résolution du compte AVANT tout import : une Flex Query « All accounts »
+  // renvoie plusieurs statements. On valide d'abord pour ne jamais laisser un
+  // import partiel (statement[0] importé puis exception sur statement[1] →
+  // reconcile jamais exécuté et échec en boucle).
+  const distinctAccountIds = [...new Set(statements.map((s) => s.accountId))];
+  if (!account.externalAccountId) {
+    if (distinctAccountIds.length > 1) {
       throw new Error(
-        `Le relevé concerne ${statement.accountId} mais le compte lié est ${account.externalAccountId}`
+        `Le relevé contient plusieurs comptes (${distinctAccountIds.join(", ")}). ` +
+          `Lie une Flex Query propre à un seul compte IBKR.`
       );
     }
+    if (distinctAccountIds[0]) {
+      await prisma.brokerAccount.update({
+        where: { id: accountDbId },
+        data: { externalAccountId: distinctAccountIds[0] },
+      });
+      account.externalAccountId = distinctAccountIds[0];
+    }
+  }
 
+  // N'importe que les statements du compte lié ; signale les autres.
+  const ours = statements.filter(
+    (s) => s.accountId === account.externalAccountId
+  );
+  const skipped = distinctAccountIds.filter(
+    (id) => id !== account.externalAccountId
+  );
+  if (skipped.length > 0) {
+    warnings.push(
+      `Relevé multi-comptes : comptes ignorés (${skipped.join(", ")}), seul ${account.externalAccountId} est lié.`
+    );
+  }
+  if (ours.length === 0) {
+    throw new Error(
+      `Le relevé ne contient pas le compte lié ${account.externalAccountId} ` +
+        `(comptes présents : ${distinctAccountIds.join(", ") || "aucun"}).`
+    );
+  }
+
+  for (const statement of ours) {
     const c = await importStatement(accountDbId, statement, source);
     counters = {
       fetched: counters.fetched + c.fetched,

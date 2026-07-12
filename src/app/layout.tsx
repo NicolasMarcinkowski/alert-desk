@@ -16,7 +16,7 @@ const plexMono = IBM_Plex_Mono({
 
 export const metadata: Metadata = {
   title: "Alert Desk",
-  description: "Suivi de trading self-hosted — données IBKR",
+  description: "Suivi de trading self-hosted — saisie manuelle et connecteurs courtiers",
 };
 
 export default function RootLayout({

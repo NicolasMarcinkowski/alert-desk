@@ -53,14 +53,25 @@ export async function POST(request: Request) {
     instrumentId =
       typeof body.instrumentId === "string" ? body.instrumentId : "";
     if (!instrumentId) return badRequest("instrumentId requis");
-    const position = await prisma.position.findFirst({
+    // L'instrument peut être détenu sur plusieurs comptes (ex. IBKR + manuel) :
+    // on lie l'alerte au compte de la plus grosse position (déterministe), pas
+    // à un compte arbitraire. `accountId` explicite du client prioritaire.
+    const positions = await prisma.position.findMany({
       where: { instrumentId, account: { userId: session.user.id } },
-      select: { brokerAccountId: true },
+      select: { brokerAccountId: true, quantity: true },
     });
-    if (!position) {
+    if (positions.length === 0) {
       return badRequest("aucune position ouverte sur cet instrument");
     }
-    brokerAccountId = position.brokerAccountId;
+    const requestedAccount =
+      typeof body.brokerAccountId === "string" ? body.brokerAccountId : null;
+    const chosen =
+      (requestedAccount &&
+        positions.find((p) => p.brokerAccountId === requestedAccount)) ||
+      [...positions].sort(
+        (a, b) => Math.abs(Number(b.quantity)) - Math.abs(Number(a.quantity))
+      )[0];
+    brokerAccountId = chosen.brokerAccountId;
   }
 
   const rule = await prisma.alertRule.create({

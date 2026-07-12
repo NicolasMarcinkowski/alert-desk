@@ -95,8 +95,10 @@ model BrokerAccount {
   label              String
   /// MANUAL = saisie d'ordres à la main ; IBKR = lié via Flex Web Service
   broker             BrokerType          @default(IBKR)
-  /// N° de compte côté broker ("U1234567" IBKR, appris au premier import)
-  externalAccountId  String?             @unique @map("external_account_id")
+  /// N° de compte côté broker ("U1234567" IBKR, appris au premier import).
+  /// Unicité PAR utilisateur (composite plus bas) : un même compte joint IBKR
+  /// peut être lié par plusieurs utilisateurs, mais pas deux fois par le même.
+  externalAccountId  String?             @map("external_account_id")
   baseCurrency       String              @default("EUR") @map("base_currency")
   /// Token Flex Web Service, chiffré (crypto/seal) — null pour MANUAL
   flexTokenEncrypted String?             @map("flex_token_encrypted")
@@ -117,6 +119,7 @@ model BrokerAccount {
   corporateActions  CorporateAction[]
   alertRules        AlertRule[]
 
+  @@unique([userId, externalAccountId])
   @@index([userId])
   @@map("broker_accounts")
   @@schema("app")
@@ -306,8 +309,10 @@ model Instrument {
   strike           Decimal?      @db.Decimal(18, 6)
   expiry           DateTime?     @db.Date
   putCall          PutCall?      @map("put_call")
-  /// Symbole OCC 21 caractères normalisé (jointure fournisseurs de quotes)
-  occSymbol        String?       @unique @map("occ_symbol")
+  /// Symbole OCC 21 caractères normalisé (jointure fournisseurs de quotes).
+  /// NON unique : un instrument saisi manuellement (conid "manual:…") et le
+  /// même contrat importé d'IBKR (conid réel) coexistent avec le même OCC.
+  occSymbol        String?       @map("occ_symbol")
   exchange         String?
   isin             String?
 
@@ -323,6 +328,7 @@ model Instrument {
   @@index([symbol])
   @@index([underlyingSymbol])
   @@index([secType, expiry])
+  @@index([occSymbol])
   @@map("instruments")
   @@schema("trading")
 }

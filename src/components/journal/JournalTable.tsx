@@ -354,7 +354,7 @@ function DetailPanel({
           </button>
           {saved && <span className="text-xs text-gain">Enregistré ✓</span>}
           <span className="ml-auto text-[10px] text-ink-mute">
-            Ces annotations survivent aux ré-imports IBKR
+            Ces annotations survivent aux ré-imports du courtier
           </span>
         </div>
       </div>

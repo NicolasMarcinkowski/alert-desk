@@ -12,6 +12,7 @@ export async function POST(request: Request) {
 
   const body = await request.json().catch(() => null);
   const label = typeof body?.label === "string" ? body.label.trim() : "";
+  const broker = body?.broker === "MANUAL" ? "MANUAL" : "IBKR";
   const flexToken =
     typeof body?.flexToken === "string" ? body.flexToken.trim() : "";
   const queryIdTradeConfirms =
@@ -23,6 +24,20 @@ export async function POST(request: Request) {
   const baseCurrency = body?.baseCurrency === "USD" ? "USD" : "EUR";
 
   if (!label || label.length > 60) return badRequest("label requis (max 60 caractères)");
+
+  if (broker === "MANUAL") {
+    const account = await prisma.brokerAccount.create({
+      data: {
+        userId: session.user.id,
+        label,
+        broker: "MANUAL",
+        baseCurrency,
+      },
+      select: { id: true },
+    });
+    return Response.json({ id: account.id }, { status: 201 });
+  }
+
   if (!flexToken) return badRequest("flexToken requis");
   if (!queryIdTradeConfirms && !queryIdActivity) {
     return badRequest("au moins un query ID requis");

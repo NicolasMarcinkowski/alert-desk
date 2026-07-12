@@ -23,16 +23,17 @@ yarn prisma:generate        # régénère le client + index.ts re-export
 - `lib/engine/` — moteur in-process démarré par `instrumentation.ts` : souscriptions (positions ∪ alertes ∪ watchlists), hub SSE (ticks coalescés ~300 ms, **filtrés par utilisateur** via user-symbols), évaluateur d'alertes (positions clées par compte+instrument), re-priming REST quotidien du prevClose des symboles websocket. Côté client, `useLiveQuotes` partage UNE connexion EventSource par onglet.
 - `lib/db/queries.ts` + `lib/db/analytics.ts` — lectures des pages (server components).
 - `app/api/` — REST ; session scopée par `session.user.id`, cron via `CRON_SECRET`, admin via `ADMIN_TOKEN` (Bearer, fail-closed, timing-safe).
+- `src/proxy.ts` — filet « tout privé par défaut » (cookie de session requis hors /login, /api/auth, /api/cron, /api/admin) ; la vraie vérif reste layout `(app)` + `requireSession` (PrismaAdapter ⇒ pas d'`auth()` en edge).
 
 ## Invariants — à ne jamais casser
 
 1. Montants/prix/quantités : `Decimal` en DB (strings vers Prisma), jamais Float.
 2. Annotations journal (`strategy/tags/notes/rating` des round_trips) : **upsert-only**, elles survivent aux ré-imports.
 3. Le relevé Activity IBKR **enrichit et écrase** l'intraday ; `fifoPnlRealized` IBKR ne se recalcule jamais (sauf source MANUAL : PRU moyen, matérialisé dans le même champ).
-4. Alertes : fire atomique (`updateMany where state=ARMED`), notification **après** l'écriture d'état ; `AUTO_ON_RECROSS` exige une observation fausse avant réarmement.
+4. Alertes : fire atomique (`updateMany where state=ARMED`) ; l'état FINAL (COOLDOWN pour AUTO) est écrit **avant** le dispatch — la notification part après l'écriture d'état, mais un crash pendant l'envoi ne doit jamais laisser une règle AUTO bloquée en TRIGGERED ; `AUTO_ON_RECROSS` exige une observation fausse avant réarmement.
 5. Ordres manuels uniquement sur comptes MANUAL (le snapshot IBKR écraserait la réconciliation).
 6. Schéma Prisma : colonnes snake_case via `@map` (une colonne oubliée = bug silencieux, cf. rearm_mode).
-7. DA : vert `#22C55E`/rouge `#EF4444` réservés au P&L ; toute valeur de marché porte un badge de fraîcheur LIVE / ~15 MIN / EOD ; réalisé et latent jamais fusionnés.
+7. DA : vert `#22C55E`/rouge `#EF4444` réservés au P&L (jamais pour des statuts UI — utiliser accent/ambre) ; toute valeur de marché porte un badge de fraîcheur LIVE / ~15 MIN / EOD / **FIGÉ** (SSE coupé ou cours plus vieux que 30 min : `marketFreshness`/`isQuoteStale` dans `FreshnessBadge`) ; réalisé et latent jamais fusionnés.
 8. Singletons process (moteur, cache, hub SSE, chaînes sync) : gardés par `globalThis` (hot-reload dev).
 
 ## Variables d'env (mêmes noms que palato-scoring / team-lol-stats)

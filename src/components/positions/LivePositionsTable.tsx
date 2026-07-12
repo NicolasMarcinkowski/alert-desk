@@ -2,7 +2,10 @@
 
 import { Fragment } from "react";
 import { useLiveQuotes } from "@/hooks/useLiveQuotes";
-import { FreshnessBadge, type Freshness } from "@/components/ui/FreshnessBadge";
+import {
+  FreshnessBadge,
+  marketFreshness,
+} from "@/components/ui/FreshnessBadge";
 import {
   formatPrice,
   formatQty,
@@ -47,19 +50,13 @@ export function LivePositionsTable({
   groups: LivePositionGroupData[];
   baseCurrency: string;
 }) {
-  const { quotes } = useLiveQuotes();
+  const { quotes, connected } = useLiveQuotes();
 
   const computed = groups.map((group) => {
     const rows = group.rows.map((row) => {
       const quote = quotes[row.key];
       const mark = quote?.last ?? row.eodMark;
-      const freshness: Freshness | null = quote
-        ? quote.delayed
-          ? "delayed"
-          : "live"
-        : row.eodMark !== null
-          ? "eod"
-          : null;
+      const freshness = marketFreshness(quote, row.eodMark !== null, connected);
       const latent =
         mark !== null
           ? (mark - row.avgCost) * row.quantity * row.multiplier

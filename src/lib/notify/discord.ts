@@ -9,6 +9,8 @@ export async function sendDiscord(
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ content: text }),
+      // Sans timeout, un endpoint muet suspend tout le dispatch d'alertes.
+      signal: AbortSignal.timeout(10_000),
     });
     if (!res.ok) {
       const body = await res.text();

@@ -37,7 +37,7 @@ export function SyncButton({ disabled }: { disabled: boolean }) {
       <button
         type="button"
         disabled
-        title="Relie d'abord un compte IBKR dans les réglages"
+        title="Connecte d'abord une plateforme dans les réglages"
         className="cursor-not-allowed rounded-lg border border-edge bg-surface px-3 py-1.5 text-xs font-medium text-ink-mute"
       >
         Sync

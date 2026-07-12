@@ -49,8 +49,10 @@ export class YahooProvider implements MarketDataProvider {
       const meta = data?.chart?.result?.[0]?.meta;
       const last = Number(meta?.regularMarketPrice ?? 0);
       if (!meta || last === 0) return null;
+      // previousClose = vraie clôture de la veille ; chartPreviousClose est
+      // relatif au range (2d) → peut être à 2 séances et fausser le % du jour.
       const prevClose =
-        Number(meta.chartPreviousClose ?? meta.previousClose ?? 0) || undefined;
+        Number(meta.previousClose ?? meta.chartPreviousClose ?? 0) || undefined;
       return {
         symbol: cacheKey(ref),
         last,

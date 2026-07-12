@@ -3,9 +3,9 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db/client";
 import { PageTitle } from "@/components/ui/PagePlaceholder";
 import {
-  BrokerAccountsPanel,
-  type BrokerAccountView,
-} from "@/components/settings/BrokerAccountsPanel";
+  ConnectorsPanel,
+  type ConnectorAccountView,
+} from "@/components/settings/ConnectorsPanel";
 import {
   NotificationsPanel,
   type ChannelsState,
@@ -14,9 +14,12 @@ import {
 export const dynamic = "force-dynamic";
 
 const TABS = [
-  { key: "ibkr", label: "Comptes" },
+  { key: "connecteurs", label: "Connecteurs" },
   { key: "notifs", label: "Notifications" },
+  { key: "allowlist", label: "Allowlist" },
 ] as const;
+
+type TabKey = (typeof TABS)[number]["key"];
 
 export default async function ReglagesPage({
   searchParams,
@@ -25,13 +28,16 @@ export default async function ReglagesPage({
 }) {
   const session = await auth();
   const { tab: tabParam } = await searchParams;
-  const tab = tabParam === "notifs" ? "notifs" : "ibkr";
+  const tab: TabKey =
+    tabParam === "notifs" || tabParam === "allowlist"
+      ? tabParam
+      : "connecteurs";
 
   return (
     <div>
       <PageTitle
         title="Réglages"
-        subtitle="Comptes IBKR · notifications · allowlist (via .env)"
+        subtitle="Connecteurs de plateformes · notifications · accès"
       />
 
       <div className="mb-5 flex gap-1 border-b border-edge">
@@ -48,25 +54,25 @@ export default async function ReglagesPage({
             {t.label}
           </Link>
         ))}
-        <span className="px-3 py-2 text-sm text-ink-mute" title="Jalon M4">
-          Préférences (M4)
-        </span>
       </div>
 
-      {tab === "ibkr" ? <IbkrTab userId={session!.user.id} /> : null}
+      {tab === "connecteurs" ? (
+        <ConnectorsTab userId={session!.user.id} />
+      ) : null}
       {tab === "notifs" ? <NotifsTab userId={session!.user.id} /> : null}
+      {tab === "allowlist" ? <AllowlistTab /> : null}
     </div>
   );
 }
 
-async function IbkrTab({ userId }: { userId: string }) {
+async function ConnectorsTab({ userId }: { userId: string }) {
   const accounts = await prisma.brokerAccount.findMany({
     where: { userId },
     orderBy: { createdAt: "asc" },
     include: { flexQueries: true },
   });
 
-  const view: BrokerAccountView[] = accounts.map((a) => ({
+  const view: ConnectorAccountView[] = accounts.map((a) => ({
     id: a.id,
     label: a.label,
     broker: a.broker,
@@ -80,18 +86,7 @@ async function IbkrTab({ userId }: { userId: string }) {
     })),
   }));
 
-  return (
-    <>
-      <div className="mb-4 rounded-lg border border-edge-soft bg-surface-2/40 px-4 py-3 text-xs text-ink-soft">
-        Le token du <span className="font-medium">Flex Web Service</span> et
-        les deux Query IDs se créent dans Client Portal IBKR (Performance &
-        Reports → Flex Queries). La query Activity doit inclure le champ{" "}
-        <span className="font-mono">fifoPnlRealized</span> — voir le README.
-        Les tokens sont chiffrés en base (AES-256-GCM).
-      </div>
-      <BrokerAccountsPanel accounts={view} />
-    </>
-  );
+  return <ConnectorsPanel accounts={view} />;
 }
 
 async function NotifsTab({ userId }: { userId: string }) {
@@ -107,4 +102,56 @@ async function NotifsTab({ userId }: { userId: string }) {
     discord: { configured: dbChannels.some((c) => c.type === "DISCORD") },
   };
   return <NotificationsPanel channels={channels} />;
+}
+
+function AllowlistTab() {
+  const emails = (process.env.ALLOWED_EMAILS ?? "")
+    .split(",")
+    .map((e) => e.trim().toLowerCase())
+    .filter(Boolean);
+
+  return (
+    <div className="flex max-w-140 flex-col gap-3.5 rounded-xl border border-edge bg-surface p-4">
+      <div className="flex flex-col gap-0.5">
+        <span className="text-sm font-semibold">
+          Emails autorisés (Google OAuth)
+        </span>
+        <span className="text-xs text-ink-mute">
+          Seuls ces comptes peuvent se connecter — toute autre adresse est
+          refusée, et une liste vide bloque tout le monde.
+        </span>
+      </div>
+      {emails.map((email) => (
+        <div
+          key={email}
+          className="flex items-center gap-2.5 rounded-lg border border-edge-soft bg-surface-2/50 px-3 py-2.5"
+        >
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            className="text-gain"
+          >
+            <path d="M20 6L9 17l-5-5" />
+          </svg>
+          <span className="font-mono text-sm">{email}</span>
+        </div>
+      ))}
+      {emails.length === 0 && (
+        <p className="rounded-lg border border-loss/30 bg-loss/10 px-3 py-2 text-sm text-loss">
+          Aucun email autorisé — personne ne peut se connecter.
+        </p>
+      )}
+      <p className="text-xs leading-relaxed text-ink-mute">
+        Cette liste est gérée par la variable{" "}
+        <span className="font-mono text-ink-soft">ALLOWED_EMAILS</span> du
+        serveur (fichier <span className="font-mono text-ink-soft">.env</span>
+        ) : la modifier ici serait moins sûr qu&apos;un accès au serveur.
+        Retirer un email révoque sa session immédiatement.
+      </p>
+    </div>
+  );
 }

@@ -11,6 +11,7 @@
  */
 
 import { randomUUID } from "crypto";
+import { Prisma } from "@/generated/prisma";
 import { prisma } from "@/lib/db/client";
 import { buildOccSymbol } from "@/lib/occ";
 import { reconcilePositions } from "@/lib/sync/reconcile";
@@ -101,8 +102,12 @@ async function resolveInstrument(input: ManualOrderInput): Promise<string> {
         "option incomplète : sous-jacent, strike, échéance et call/put requis"
       );
     }
-    const existing = await prisma.instrument.findUnique({
+    // occSymbol n'est plus unique (un placeholder "manual:" et l'instrument
+    // IBKR réel peuvent coexister) : on réutilise en priorité le conid réel
+    // (tri : "12345…" < "manual:…") plutôt que le placeholder.
+    const existing = await prisma.instrument.findFirst({
       where: { occSymbol },
+      orderBy: { conid: "asc" },
     });
     if (existing) return existing.id;
     const created = await prisma.instrument.create({
@@ -174,7 +179,11 @@ export async function addManualExecution(
   );
   const multiplier =
     input.secType === "OPT" ? (input.multiplier ?? 100) : (input.multiplier ?? 1);
-  const gross = input.quantity * input.price * multiplier;
+  // Decimal (pas de flottant JS) — invariant 1 : la valeur persistée doit être
+  // exacte (100 × 0,07 = 7, pas 7.000000000000001).
+  const gross = new Prisma.Decimal(input.quantity)
+    .mul(input.price)
+    .mul(multiplier);
 
   const execution = await prisma.execution.create({
     data: {
@@ -184,7 +193,7 @@ export async function addManualExecution(
       side: input.side,
       quantity: String(input.quantity),
       price: String(input.price),
-      proceeds: String(input.side === "BUY" ? -gross : gross),
+      proceeds: (input.side === "BUY" ? gross.negated() : gross).toString(),
       commission: String(-Math.abs(input.fees)),
       commissionCurrency: input.currency,
       currency: input.currency,

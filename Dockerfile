@@ -43,9 +43,15 @@ COPY --from=builder /app/prisma.config.ts ./
 COPY --from=builder /app/src/generated ./src/generated
 COPY --from=builder /app/node_modules ./node_modules
 
-RUN echo '#!/bin/sh' > /app/start.sh && \
-    echo 'yarn prisma migrate deploy' >> /app/start.sh && \
-    echo 'node server.js' >> /app/start.sh && \
+# set -e : si la migration échoue, le conteneur crashe (restart-loop visible)
+# au lieu de démarrer sur un schéma désynchronisé.
+# exec : node devient PID 1 et reçoit SIGTERM → arrêt propre (moteur, SSE).
+RUN printf '%s\n' \
+    '#!/bin/sh' \
+    'set -e' \
+    'yarn prisma migrate deploy' \
+    'exec node server.js' \
+    > /app/start.sh && \
     chmod +x /app/start.sh
 
 # Utilisateur non-root (même pattern que palato-scoring)

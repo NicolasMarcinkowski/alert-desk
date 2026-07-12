@@ -214,11 +214,35 @@ export async function importStatement(
     instrumentCache
   );
 
+  // Trades bustés : un relevé ACTIVITY est autoritaire sur sa fenêtre
+  // [fromDate, toDate]. Après import, toute exécution intraday (TRADE_CONFIRMS)
+  // de cette fenêtre jamais confirmée par l'Activity a été annulée par IBKR
+  // (ligne « (Ca.) » ignorée au parsing) → on la retire, sinon round-trips et
+  // P&L restent faussés à vie (invariant 3). Ne touche jamais MANUAL ni ACTIVITY.
+  if (source === "ACTIVITY" && statement.fromDate && statement.toDate) {
+    await prisma.execution.deleteMany({
+      where: {
+        brokerAccountId: accountDbId,
+        source: "TRADE_CONFIRMS",
+        confirmedByActivity: false,
+        tradeDate: {
+          gte: new Date(`${statement.fromDate}T00:00:00Z`),
+          lte: new Date(`${statement.toDate}T00:00:00Z`),
+        },
+      },
+    });
+  }
+
   // Snapshots de positions (Activity uniquement en pratique)
+  const snapshotInstrumentsByDate = new Map<string, Set<string>>();
   for (const p of statement.openPositions) {
     const date = p.reportDate ?? statement.toDate;
     if (!date) continue;
     const instrumentId = await ensureInstrument(instrumentCache, p.instrument);
+    (snapshotInstrumentsByDate.get(date) ??
+      snapshotInstrumentsByDate.set(date, new Set()).get(date)!).add(
+      instrumentId
+    );
     await prisma.positionSnapshot.upsert({
       where: {
         brokerAccountId_date_instrumentId: {
@@ -254,6 +278,22 @@ export async function importStatement(
       updated: 0,
       duplicates: 0,
     });
+  }
+
+  // Snapshot ré-importé (position restatée/bustée) : les lignes qui ont
+  // disparu d'une date déjà présente ne sont plus supprimées par le seul
+  // upsert. Pour chaque date reportée ici, on retire les snapshots dont
+  // l'instrument n'est plus dans le relevé autoritaire.
+  if (source === "ACTIVITY") {
+    for (const [date, ids] of snapshotInstrumentsByDate) {
+      await prisma.positionSnapshot.deleteMany({
+        where: {
+          brokerAccountId: accountDbId,
+          date: new Date(`${date}T00:00:00Z`),
+          instrumentId: { notIn: [...ids] },
+        },
+      });
+    }
   }
 
   // Snapshots de NAV — depositsWithdrawals (période) affecté au toDate,

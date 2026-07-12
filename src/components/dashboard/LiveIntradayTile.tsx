@@ -3,6 +3,7 @@
 import { useLiveQuotes } from "@/hooks/useLiveQuotes";
 import type { LivePositionLite } from "@/lib/db/queries";
 import { KpiTile } from "@/components/ui/KpiTile";
+import { isQuoteStale, type Freshness } from "@/components/ui/FreshnessBadge";
 import { formatSignedMoney } from "@/lib/utils/format";
 
 /**
@@ -17,11 +18,12 @@ export function LiveIntradayTile({
   positions: LivePositionLite[];
   currency: string;
 }) {
-  const { quotes } = useLiveQuotes();
+  const { quotes, connected } = useLiveQuotes();
 
   let delta: number | null = null;
   let covered = 0;
   let anyLive = false;
+  let anyRecent = false;
   for (const p of positions) {
     const quote = quotes[p.key];
     if (!quote?.prevClose) continue;
@@ -29,8 +31,20 @@ export function LiveIntradayTile({
       (delta ?? 0) +
       (quote.last - quote.prevClose) * p.quantity * p.multiplier * p.fxRateToBase;
     covered++;
-    if (!quote.delayed) anyLive = true;
+    const recent = !isQuoteStale(quote.ts);
+    if (recent) anyRecent = true;
+    if (recent && !quote.delayed) anyLive = true;
   }
+
+  // Figé si SSE coupé ou aucune cotation récente (marché fermé / week-end)
+  const freshness: Freshness | null =
+    delta === null
+      ? null
+      : !connected || !anyRecent
+        ? "stale"
+        : anyLive
+          ? "live"
+          : "delayed";
 
   return (
     <KpiTile
@@ -42,7 +56,7 @@ export function LiveIntradayTile({
           : "en attente de cotations"
       }
       tone={delta === null ? "neutral" : delta >= 0 ? "gain" : "loss"}
-      freshness={delta !== null ? (anyLive ? "live" : "delayed") : "live"}
+      freshness={freshness ?? undefined}
     />
   );
 }

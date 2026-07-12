@@ -39,7 +39,7 @@ export default async function DashboardPage() {
           <span>
             Commence par ajouter ton premier ordre à la main — ou{" "}
             <Link href="/reglages" className="font-medium text-accent underline">
-              relie un compte IBKR
+              connecte ta plateforme
             </Link>{" "}
             pour l&apos;import automatique.
           </span>
@@ -102,7 +102,7 @@ export default async function DashboardPage() {
       <div className="mt-4 grid gap-4 lg:grid-cols-3">
         <Card
           title="Courbe d'equity — NAV"
-          subtitle="Snapshot quotidien IBKR (Activity Flex) · devise de base"
+          subtitle="Snapshot quotidien du courtier · devise de base"
           className="lg:col-span-2"
         >
           <EquityCurve points={data.equityCurve} currency={ccy} />

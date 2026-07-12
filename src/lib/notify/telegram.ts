@@ -18,6 +18,8 @@ export async function sendTelegram(
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ chat_id: chatId, text }),
+        // Sans timeout, un endpoint muet suspend tout le dispatch d'alertes.
+        signal: AbortSignal.timeout(10_000),
       }
     );
     if (!res.ok) {

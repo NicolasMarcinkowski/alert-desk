@@ -59,6 +59,14 @@ export default async function AnalyticsPage({
         </div>
       </div>
 
+      {data.mixedBaseCurrencies && (
+        <p className="mb-4 rounded-lg border border-warn/40 bg-warn/10 px-4 py-2.5 text-sm text-warn">
+          Comptes en plusieurs devises de base : seuls les comptes en {ccy} sont
+          inclus dans ces chiffres (la conversion multi-devises viendra plus
+          tard).
+        </p>
+      )}
+
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4 xl:grid-cols-8">
         <KpiTile
           label="P&L net réalisé"
@@ -126,7 +134,7 @@ export default async function AnalyticsPage({
         <KpiTile
           label="Frais"
           value={has ? formatMoney(kpis.fees, ccy) : "—"}
-          sub="commissions IBKR"
+          sub="commissions courtier"
         />
       </div>
 

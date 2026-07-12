@@ -21,7 +21,7 @@ export default async function LoginPage({
           <div className="text-center">
             <h1 className="text-lg font-bold tracking-widest">ALERT DESK</h1>
             <p className="text-sm text-ink-soft">
-              Surveillance de marché · Données IBKR
+              Surveillance de marché · Journal de trading
             </p>
           </div>
         </div>
