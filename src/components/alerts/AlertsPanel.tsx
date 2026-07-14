@@ -3,14 +3,26 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 
+export type AlertRuleType =
+  | "PRICE_ABOVE"
+  | "PRICE_BELOW"
+  | "PCT_CHANGE_DAY"
+  | "POSITION_PNL_ABOVE"
+  | "POSITION_PNL_BELOW"
+  | "RSI_BELOW"
+  | "RSI_ABOVE"
+  | "SMA_CROSS_UP"
+  | "SMA_CROSS_DOWN"
+  | "BREAKOUT_HIGH"
+  | "BREAKOUT_LOW"
+  | "IV_ABOVE"
+  | "IV_BELOW"
+  | "PUT_CALL_ABOVE"
+  | "GAMMA_FLIP_NEAR";
+
 export interface AlertRuleView {
   id: string;
-  type:
-    | "PRICE_ABOVE"
-    | "PRICE_BELOW"
-    | "PCT_CHANGE_DAY"
-    | "POSITION_PNL_ABOVE"
-    | "POSITION_PNL_BELOW";
+  type: AlertRuleType;
   label: string;
   threshold: number;
   state: "ARMED" | "TRIGGERED" | "COOLDOWN" | "DISABLED";
@@ -19,6 +31,20 @@ export interface AlertRuleView {
   lastTriggeredAt: string | null;
   notifyTelegram: boolean;
   notifyDiscord: boolean;
+  /** Paramètres d'indicateur (RSI: period ; SMA cross: fast/slow) */
+  params?: { period?: number; fast?: number; slow?: number } | null;
+}
+
+/** Libellé des périodes d'indicateur pour la liste des règles. */
+function paramLabel(rule: AlertRuleView): string {
+  const p = rule.params ?? {};
+  if (rule.type === "SMA_CROSS_UP" || rule.type === "SMA_CROSS_DOWN") {
+    return `MM${p.fast ?? 9}/MM${p.slow ?? 21}`;
+  }
+  if (rule.type === "RSI_BELOW" || rule.type === "RSI_ABOVE") {
+    return `RSI(${p.period ?? 14})`;
+  }
+  return "";
 }
 
 export interface AlertEventView {
@@ -33,12 +59,22 @@ export interface PositionOption {
   label: string;
 }
 
-const CONDITION_LABEL: Record<AlertRuleView["type"], string> = {
+const CONDITION_LABEL: Record<AlertRuleType, string> = {
   PRICE_ABOVE: "franchit ↑",
   PRICE_BELOW: "franchit ↓",
   PCT_CHANGE_DAY: "bouge de ±%",
   POSITION_PNL_ABOVE: "P&L latent ≥",
   POSITION_PNL_BELOW: "P&L latent ≤",
+  RSI_BELOW: "RSI sous",
+  RSI_ABOVE: "RSI au-dessus de",
+  SMA_CROSS_UP: "croisement MM ↑",
+  SMA_CROSS_DOWN: "croisement MM ↓",
+  BREAKOUT_HIGH: "casse le plus-haut (j)",
+  BREAKOUT_LOW: "casse le plus-bas (j)",
+  IV_ABOVE: "IV ATM ≥",
+  IV_BELOW: "IV ATM ≤",
+  PUT_CALL_ABOVE: "put/call ≥",
+  GAMMA_FLIP_NEAR: "proche gamma flip ≤",
 };
 
 const STATE_BADGE: Record<
@@ -92,53 +128,86 @@ export function AlertsPanel({
   const [error, setError] = useState<string | null>(null);
 
   // Builder
-  const [scope, setScope] = useState<"ticker" | "position">("ticker");
+  const [scope, setScope] = useState<
+    "ticker" | "position" | "indicator" | "option"
+  >("ticker");
   const [symbol, setSymbol] = useState("");
   const [instrumentId, setInstrumentId] = useState("");
-  const [type, setType] = useState<AlertRuleView["type"]>("PRICE_ABOVE");
+  const [type, setType] = useState<AlertRuleType>("PRICE_ABOVE");
   const [threshold, setThreshold] = useState("");
+  // Paramètres d'indicateur (analyse technique)
+  const [period, setPeriod] = useState("14");
+  const [fast, setFast] = useState("9");
+  const [slow, setSlow] = useState("21");
   const [notifyTelegram, setNotifyTelegram] = useState(true);
   const [notifyDiscord, setNotifyDiscord] = useState(false);
   const [cooldownSeconds, setCooldownSeconds] = useState(300);
   const [rearmMode, setRearmMode] =
     useState<AlertRuleView["rearmMode"]>("AUTO_ON_RECROSS");
 
-  async function api(path: string, init: RequestInit, okRefresh = true) {
+  async function api(
+    path: string,
+    init: RequestInit,
+    okRefresh = true
+  ): Promise<boolean> {
     setBusy(true);
     setError(null);
     try {
       const res = await fetch(path, init);
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) setError(data.error ?? `Erreur HTTP ${res.status}`);
-      else if (okRefresh) router.refresh();
+      if (!res.ok) {
+        setError(data.error ?? `Erreur HTTP ${res.status}`);
+        return false;
+      }
+      if (okRefresh) router.refresh();
+      return true;
     } finally {
       setBusy(false);
     }
   }
 
+  const isSmaCross = type === "SMA_CROSS_UP" || type === "SMA_CROSS_DOWN";
+  const isBreakout = type === "BREAKOUT_HIGH" || type === "BREAKOUT_LOW";
+  const isRsi = type === "RSI_BELOW" || type === "RSI_ABOVE";
+
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
-    await api("/api/alerts", {
+    const ok = await api("/api/alerts", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         type,
-        symbol: scope === "ticker" ? symbol : undefined,
+        symbol: scope === "position" ? undefined : symbol,
         instrumentId: scope === "position" ? instrumentId : undefined,
-        threshold: Number(threshold),
+        // SMA cross : pas de seuil scalaire (périodes dans fast/slow)
+        threshold: isSmaCross ? undefined : Number(threshold),
+        period: isRsi ? Number(period) : undefined,
+        fast: isSmaCross ? Number(fast) : undefined,
+        slow: isSmaCross ? Number(slow) : undefined,
         notifyTelegram,
         notifyDiscord,
         cooldownSeconds,
         rearmMode,
       }),
     });
-    setThreshold("");
+    // Ne vide la saisie que sur succès (sinon on perd le formulaire sur erreur)
+    if (ok) setThreshold("");
   }
 
   const inputClass =
     "rounded-lg border border-edge bg-surface-2 px-3 py-2 text-sm outline-none focus:border-accent/60";
+  const isIvType = type === "IV_ABOVE" || type === "IV_BELOW";
+  const isPctType = isIvType || type === "GAMMA_FLIP_NEAR";
   const unit =
-    type === "PCT_CHANGE_DAY" ? "%" : type.startsWith("POSITION") ? "€" : "$";
+    type === "PCT_CHANGE_DAY" || isPctType
+      ? "%"
+      : type.startsWith("POSITION")
+        ? "€"
+        : isRsi || type === "PUT_CALL_ABOVE"
+          ? "" // niveau RSI (0-100) ou ratio put/call
+          : isBreakout
+            ? "j" // nb de séances
+            : "$";
 
   return (
     <div className="flex flex-col gap-5">
@@ -168,22 +237,36 @@ export function AlertsPanel({
           <select
             value={scope}
             onChange={(e) => {
-              const s = e.target.value as "ticker" | "position";
+              const s = e.target.value as
+                | "ticker"
+                | "position"
+                | "indicator"
+                | "option";
               setScope(s);
-              setType(s === "ticker" ? "PRICE_ABOVE" : "POSITION_PNL_ABOVE");
+              setType(
+                s === "position"
+                  ? "POSITION_PNL_ABOVE"
+                  : s === "indicator"
+                    ? "RSI_BELOW"
+                    : s === "option"
+                      ? "IV_ABOVE"
+                      : "PRICE_ABOVE"
+              );
             }}
             className={inputClass}
           >
             <option value="ticker">le ticker</option>
+            <option value="indicator">l&apos;indicateur (analyse technique)</option>
+            <option value="option">les options (IV / gamma)</option>
             <option value="position" disabled={positions.length === 0}>
               la position
             </option>
           </select>
-          {scope === "ticker" ? (
+          {scope !== "position" ? (
             <input
               value={symbol}
               onChange={(e) => setSymbol(e.target.value.toUpperCase())}
-              placeholder="AAPL"
+              placeholder={scope === "indicator" ? "SPY" : "AAPL"}
               required
               className={`${inputClass} w-28 font-mono`}
             />
@@ -204,36 +287,108 @@ export function AlertsPanel({
           )}
           <select
             value={type}
-            onChange={(e) => setType(e.target.value as AlertRuleView["type"])}
+            onChange={(e) => setType(e.target.value as AlertRuleType)}
             className={inputClass}
           >
-            {scope === "ticker" ? (
+            {scope === "ticker" && (
               <>
                 <option value="PRICE_ABOVE">franchit ↑</option>
                 <option value="PRICE_BELOW">franchit ↓</option>
                 <option value="PCT_CHANGE_DAY">bouge de ± (%)</option>
               </>
-            ) : (
+            )}
+            {scope === "indicator" && (
+              <>
+                <option value="RSI_BELOW">RSI sous (survendu)</option>
+                <option value="RSI_ABOVE">RSI au-dessus (suracheté)</option>
+                <option value="SMA_CROSS_UP">croisement MM haussier</option>
+                <option value="SMA_CROSS_DOWN">croisement MM baissier</option>
+                <option value="BREAKOUT_HIGH">casse plus-haut N j</option>
+                <option value="BREAKOUT_LOW">casse plus-bas N j</option>
+              </>
+            )}
+            {scope === "option" && (
+              <>
+                <option value="IV_ABOVE">IV ATM ≥ (%)</option>
+                <option value="IV_BELOW">IV ATM ≤ (%)</option>
+                <option value="PUT_CALL_ABOVE">put/call ≥ (ratio)</option>
+                <option value="GAMMA_FLIP_NEAR">proche gamma flip ≤ (%)</option>
+              </>
+            )}
+            {scope === "position" && (
               <>
                 <option value="POSITION_PNL_ABOVE">P&L latent ≥</option>
                 <option value="POSITION_PNL_BELOW">P&L latent ≤</option>
               </>
             )}
           </select>
-          <div className="relative">
-            <input
-              value={threshold}
-              onChange={(e) => setThreshold(e.target.value)}
-              type="number"
-              step="any"
-              required
-              placeholder="190"
-              className={`${inputClass} w-28 pr-7 font-mono`}
-            />
-            <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-xs text-ink-mute">
-              {unit}
-            </span>
-          </div>
+          {isSmaCross ? (
+            <div className="flex items-center gap-1.5 font-mono text-xs">
+              <input
+                value={fast}
+                onChange={(e) => setFast(e.target.value)}
+                type="number"
+                min="2"
+                required
+                aria-label="Période courte"
+                className={`${inputClass} w-16`}
+              />
+              <span className="text-ink-mute">/</span>
+              <input
+                value={slow}
+                onChange={(e) => setSlow(e.target.value)}
+                type="number"
+                min="3"
+                required
+                aria-label="Période longue"
+                className={`${inputClass} w-16`}
+              />
+              <span className="text-ink-mute">j</span>
+            </div>
+          ) : (
+            <div className="relative">
+              <input
+                value={threshold}
+                onChange={(e) => setThreshold(e.target.value)}
+                type="number"
+                // breakout = nb entier de séances ; RSI = niveau 0-100
+                step={isBreakout ? "1" : "any"}
+                min={isBreakout ? "2" : isRsi ? "1" : undefined}
+                max={isBreakout ? "400" : isRsi ? "99" : undefined}
+                required
+                placeholder={
+                  isRsi || isIvType
+                    ? "30"
+                    : isBreakout
+                      ? "20"
+                      : type === "PUT_CALL_ABOVE"
+                        ? "1.2"
+                        : type === "GAMMA_FLIP_NEAR"
+                          ? "0.5"
+                          : "190"
+                }
+                className={`${inputClass} w-28 pr-7 font-mono`}
+              />
+              <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-xs text-ink-mute">
+                {unit}
+              </span>
+            </div>
+          )}
+          {isRsi && (
+            <label className="flex items-center gap-1.5 text-xs text-ink-soft">
+              période
+              <input
+                value={period}
+                onChange={(e) => setPeriod(e.target.value)}
+                type="number"
+                min="2"
+                max="100"
+                required
+                aria-label="Période RSI"
+                className={`${inputClass} w-16 font-mono`}
+              />
+            </label>
+          )}
           <span className="font-mono text-xs font-semibold tracking-wider text-ink-mute">
             ALORS
           </span>
@@ -317,15 +472,32 @@ export function AlertsPanel({
                         {rule.label}
                       </span>
                       <span className="ml-2 text-xs text-ink-soft">
-                        {CONDITION_LABEL[rule.type]}{" "}
-                        <span className="font-mono tabular-nums">
-                          {rule.threshold}
-                          {rule.type === "PCT_CHANGE_DAY"
-                            ? " %"
-                            : rule.type.startsWith("POSITION")
-                              ? " €"
-                              : ""}
-                        </span>
+                        {paramLabel(rule) && (
+                          <span className="mr-1 font-mono text-ink-mute">
+                            {paramLabel(rule)}
+                          </span>
+                        )}
+                        {CONDITION_LABEL[rule.type]}
+                        {rule.type !== "SMA_CROSS_UP" &&
+                          rule.type !== "SMA_CROSS_DOWN" && (
+                            <>
+                              {" "}
+                              <span className="font-mono tabular-nums">
+                                {rule.threshold}
+                                {rule.type === "PCT_CHANGE_DAY" ||
+                                rule.type === "IV_ABOVE" ||
+                                rule.type === "IV_BELOW" ||
+                                rule.type === "GAMMA_FLIP_NEAR"
+                                  ? " %"
+                                  : rule.type.startsWith("POSITION")
+                                    ? " €"
+                                    : rule.type === "BREAKOUT_HIGH" ||
+                                        rule.type === "BREAKOUT_LOW"
+                                      ? " j"
+                                      : ""}
+                              </span>
+                            </>
+                          )}
                       </span>
                     </td>
                     <td className="px-3 py-2.5 text-xs text-ink-mute">

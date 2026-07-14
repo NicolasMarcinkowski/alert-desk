@@ -37,11 +37,14 @@ export default async function DashboardPage() {
       {!data.hasAccounts && (
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-accent/30 bg-accent/10 px-4 py-2.5 text-sm">
           <span>
-            Commence par ajouter ton premier ordre à la main — ou{" "}
-            <Link href="/reglages" className="font-medium text-accent underline">
-              connecte ta plateforme
+            Aucun compte connecté. Ouvre les{" "}
+            <Link
+              href="/reglages?tab=connecteurs"
+              className="font-medium text-accent underline"
+            >
+              Connecteurs
             </Link>{" "}
-            pour l&apos;import automatique.
+            pour saisir tes ordres à la main ou relier un courtier.
           </span>
           <AddOrderButton variant="ghost" />
         </div>

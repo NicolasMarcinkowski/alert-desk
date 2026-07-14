@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { auth } from "@/lib/auth";
 import { getJournal } from "@/lib/db/queries";
 import { PageTitle } from "@/components/ui/PagePlaceholder";
@@ -9,12 +10,15 @@ import {
 } from "@/components/journal/JournalTable";
 import { formatMoney, formatPct, formatSignedMoney } from "@/lib/utils/format";
 import { AddOrderButton } from "@/components/orders/AddOrderButton";
+import { JournalExport } from "@/components/journal/JournalExport";
 
 export const dynamic = "force-dynamic";
 
 export default async function JournalPage() {
   const session = await auth();
   const { trips, kpis } = await getJournal(session!.user.id);
+  const currentYear = new Date().getUTCFullYear();
+  const exportYears = Array.from({ length: 5 }, (_, i) => currentYear - i);
   const winRate =
     kpis.closedCount > 0 ? (kpis.winCount / kpis.closedCount) * 100 : null;
 
@@ -39,12 +43,15 @@ export default async function JournalPage() {
 
   return (
     <div>
-      <div className="flex items-start justify-between gap-3">
+      <div className="flex flex-wrap items-start justify-between gap-3">
         <PageTitle
           title="Journal de trades"
           subtitle="Round-trips reconstruits depuis tes exécutions — clique sur un trade pour le détail et les annotations"
         />
-        <AddOrderButton />
+        <div className="flex flex-wrap items-center gap-2">
+          <JournalExport years={exportYears} />
+          <AddOrderButton />
+        </div>
       </div>
 
       <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
@@ -82,8 +89,15 @@ export default async function JournalPage() {
       {trips.length === 0 ? (
         <Card>
           <p className="py-10 text-center text-sm text-ink-mute">
-            Aucun trade pour l&apos;instant. Ajoute ton premier ordre avec le
-            bouton ci-dessus, ou connecte ta plateforme dans les réglages.
+            Aucun trade pour l&apos;instant. Ajoute un ordre avec le bouton
+            ci-dessus, ou connecte un compte depuis les{" "}
+            <Link
+              href="/reglages?tab=connecteurs"
+              className="text-accent underline"
+            >
+              Connecteurs
+            </Link>
+            .
           </p>
         </Card>
       ) : (

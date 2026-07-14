@@ -48,6 +48,10 @@ export default async function AlertesPage() {
     lastTriggeredAt: r.lastTriggeredAt?.toISOString() ?? null,
     notifyTelegram: r.notifyTelegram,
     notifyDiscord: r.notifyDiscord,
+    params:
+      r.params && typeof r.params === "object" && !Array.isArray(r.params)
+        ? (r.params as { period?: number; fast?: number; slow?: number })
+        : null,
   }));
 
   const eventViews: AlertEventView[] = events.map((e) => ({

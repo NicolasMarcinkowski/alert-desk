@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { auth } from "@/lib/auth";
 import { getPositionGroups } from "@/lib/db/queries";
 import { PageTitle } from "@/components/ui/PagePlaceholder";
@@ -55,8 +56,15 @@ export default async function PositionsPage() {
       {data.length === 0 ? (
         <Card>
           <p className="py-10 text-center text-sm text-ink-mute">
-            Aucune position ouverte. Ajoute ton premier ordre avec le bouton
-            ci-dessus, ou connecte ta plateforme dans les réglages.
+            Aucune position ouverte. Ajoute un ordre avec le bouton ci-dessus,
+            ou connecte un compte depuis les{" "}
+            <Link
+              href="/reglages?tab=connecteurs"
+              className="text-accent underline"
+            >
+              Connecteurs
+            </Link>
+            .
           </p>
         </Card>
       ) : (

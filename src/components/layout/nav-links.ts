@@ -10,6 +10,7 @@ export const NAV_ANALYSE = [
   { href: "/journal", label: "Journal" },
   { href: "/watchlist", label: "Watchlist" },
   { href: "/analytics", label: "Analytics" },
+  { href: "/options", label: "Options" },
 ] as const;
 
 export const NAV_MOBILE_MORE = [

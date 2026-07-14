@@ -11,11 +11,16 @@ import { prisma } from "@/lib/db/client";
 import { quoteCache } from "@/lib/marketdata/quote-cache";
 import { fetchQuote, getFinnhub, getProvider } from "@/lib/marketdata/registry";
 import { cacheKey, type Quote, type SymbolRef } from "@/lib/marketdata/types";
+import { fetchDailyBars } from "@/lib/marketdata/bars";
+import { setBars, barsStale, pruneBars } from "@/lib/marketdata/bar-cache";
+import { getOptionsAnalysis } from "@/lib/marketdata/options-chain";
 import { formatOptionName } from "@/lib/utils/format";
 import {
   alertSymbols,
   evaluateQuote,
   evaluatorStatus,
+  indicatorSymbols,
+  optionsAlertSymbols,
   loadAlertRules,
   type EvaluatorPosition,
 } from "./alert-evaluator";
@@ -24,6 +29,8 @@ import { sseHub } from "./sse-hub";
 
 const REFRESH_SUBSCRIPTIONS_MS = 60_000;
 const POLL_INTERVAL_MS = 30_000;
+/** Les clôtures historiques ne bougent pas en séance → refetch au plus /6 h. */
+const BARS_MAX_AGE_MS = 6 * 60 * 60 * 1000;
 /** Coalescence des ticks : un broadcast SSE au plus toutes les 300 ms */
 const SSE_FLUSH_MS = 300;
 const WS_SLOTS = 50;
@@ -157,12 +164,37 @@ async function collectSubscriptions(): Promise<{
   return { refs: Array.from(refs.values()), evaluatorPositions };
 }
 
+/** Bougies journalières des symboles à alerte indicateur (fetch throttlé). */
+async function refreshIndicatorBars(): Promise<void> {
+  const symbols = await indicatorSymbols();
+  pruneBars(new Set(symbols));
+  for (const symbol of symbols) {
+    if (!barsStale(symbol, BARS_MAX_AGE_MS)) continue;
+    const bars = await fetchDailyBars(symbol);
+    if (bars) setBars(symbol, bars);
+  }
+}
+
+/** Analyse de chaîne d'options des symboles à alerte options (cache EOD). */
+async function refreshOptionsAnalyses(): Promise<void> {
+  const symbols = await optionsAlertSymbols();
+  for (const symbol of symbols) {
+    // getOptionsAnalysis gère son propre cache TTL ; on peuple juste le cache
+    // que l'évaluateur lit ensuite en synchrone.
+    await getOptionsAnalysis(symbol);
+  }
+}
+
 async function refreshSubscriptions(): Promise<void> {
   const s = state();
   try {
     const { refs: subs, evaluatorPositions } = await collectSubscriptions();
     s.subscriptions = subs;
     await loadAlertRules(evaluatorPositions);
+    // Bougies (analyse technique) + chaînes d'options (GEX/IV) en arrière-plan :
+    // les alertes correspondantes restent dormantes tant que la donnée manque.
+    void refreshIndicatorBars().catch(() => {});
+    void refreshOptionsAnalyses().catch(() => {});
 
     const finnhub = getFinnhub();
     const wsCandidates = finnhub

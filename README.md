@@ -43,6 +43,24 @@ Dans Client Portal IBKR → *Performance & Reports* → *Flex Queries* :
   - toutes les 15 min, lun–ven 15h–22h30 (Paris) : `curl -H "Authorization: Bearer $CRON_SECRET" https://<domaine>/api/cron/intraday`
   - une fois par nuit vers 08h00 (Paris) : `curl -H "Authorization: Bearer $CRON_SECRET" https://<domaine>/api/cron/nightly`
 
+### Sauvegarde Postgres (indispensable)
+
+Les annotations du journal (stratégie/tags/notes/note) et les ordres saisis
+manuellement n'existent **que** dans Postgres — non rejouables depuis IBKR.
+Un `pg_dump` quotidien est le seul filet contre une perte de disque.
+
+- **Cron NAS** (quotidien 03h00), depuis `/volume1/docker/alert-desk` :
+  ```cron
+  0 3 * * *  cd /volume1/docker/alert-desk && ./scripts/backup.sh >> backup.log 2>&1
+  ```
+  Le script (`scripts/backup.sh`) fait un dump `-Fc` compressé et vérifié dans
+  `BACKUP_DIR` (déf. `/volume1/backups/alert-desk`), avec rotation à
+  `RETENTION_DAYS` jours (déf. 30). Il lit `POSTGRES_USER/DB` depuis le `.env`.
+  Idéalement, `BACKUP_DIR` pointe vers un **autre disque** que `./data`.
+- **Restauration** : `./scripts/restore.sh <fichier.dump.gz>` (arrête l'app
+  d'abord : `docker compose -f docker-compose.prod.yaml stop app`).
+- Roundtrip dump→restore vérifié (comptes et annotations préservés).
+
 ## Données de marché (M2)
 
 - **Actions US en temps réel : Finnhub** — crée une clé gratuite sur finnhub.io (60 req/min + websocket 50 symboles) et renseigne `FINNHUB_API_KEY`. Sans clé, l'app fonctionne mais les cotations actions passent en différé best-effort.

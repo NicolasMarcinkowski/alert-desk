@@ -26,7 +26,76 @@ import type {
 import { dispatchToUser } from "@/lib/notify/dispatch";
 import { formatSignedMoney } from "@/lib/utils/format";
 import type { Quote } from "@/lib/marketdata/types";
+import { getBars } from "@/lib/marketdata/bar-cache";
+import type { Bar } from "@/lib/marketdata/bars";
+import { rsi, sma, highest, lowest } from "@/lib/indicators";
+import { getCachedAnalysis } from "@/lib/marketdata/options-chain";
 import { sseHub } from "./sse-hub";
+
+/** Types d'alerte basés sur l'analyse de bougies (palier 1). */
+const INDICATOR_TYPES: readonly AlertRuleType[] = [
+  "RSI_BELOW",
+  "RSI_ABOVE",
+  "SMA_CROSS_UP",
+  "SMA_CROSS_DOWN",
+  "BREAKOUT_HIGH",
+  "BREAKOUT_LOW",
+];
+
+/** Types d'alerte basés sur l'analyse de chaîne d'options (palier 2). */
+const OPTION_TYPES: readonly AlertRuleType[] = [
+  "IV_ABOVE",
+  "IV_BELOW",
+  "PUT_CALL_ABOVE",
+  "GAMMA_FLIP_NEAR",
+];
+
+export function isIndicatorType(type: AlertRuleType): boolean {
+  return INDICATOR_TYPES.includes(type);
+}
+
+export function isOptionType(type: AlertRuleType): boolean {
+  return OPTION_TYPES.includes(type);
+}
+
+interface IndicatorParams {
+  period?: number;
+  fast?: number;
+  slow?: number;
+}
+
+/** Séries de clôtures avec la bougie du jour remplacée par le dernier cours. */
+function closesWithLive(bars: Bar[], last: number): number[] {
+  const closes = bars.map((b) => b.c);
+  if (closes.length === 0) return [last];
+  const dayOf = (ms: number) => new Date(ms).toISOString().slice(0, 10);
+  if (dayOf(bars[bars.length - 1].t) === dayOf(Date.now())) {
+    closes[closes.length - 1] = last; // bougie du jour en formation
+  } else {
+    closes.push(last); // nouvelle séance pas encore dans le relevé
+  }
+  return closes;
+}
+
+/** Bougies déjà clôturées (exclut la bougie du jour en formation). */
+function completedBars(bars: Bar[]): Bar[] {
+  if (bars.length === 0) return bars;
+  const dayOf = (ms: number) => new Date(ms).toISOString().slice(0, 10);
+  return dayOf(bars[bars.length - 1].t) === dayOf(Date.now())
+    ? bars.slice(0, -1)
+    : bars;
+}
+
+function clampInt(
+  v: unknown,
+  min: number,
+  max: number,
+  fallback: number
+): number {
+  const n = Math.round(Number(v));
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(Math.max(n, min), max);
+}
 
 export interface EvaluatorPosition {
   /** Clé du cache de quotes */
@@ -54,6 +123,7 @@ interface RuleRuntime {
   symbolKey: string;
   displayLabel: string;
   position?: EvaluatorPosition;
+  params: IndicatorParams;
 }
 
 interface EvaluatorState {
@@ -110,6 +180,11 @@ export async function loadAlertRules(
     }
     if (!symbolKey) continue;
 
+    const params: IndicatorParams =
+      rule.params && typeof rule.params === "object" && !Array.isArray(rule.params)
+        ? (rule.params as IndicatorParams)
+        : {};
+
     const runtime: RuleRuntime = {
       id: rule.id,
       userId: rule.userId,
@@ -124,6 +199,7 @@ export async function loadAlertRules(
       symbolKey,
       displayLabel,
       position,
+      params,
     };
     const list = map.get(symbolKey) ?? [];
     list.push(runtime);
@@ -137,6 +213,32 @@ export async function loadAlertRules(
 export async function alertSymbols(): Promise<string[]> {
   const rules = await prisma.alertRule.findMany({
     where: { state: { not: "DISABLED" }, symbol: { not: null } },
+    select: { symbol: true },
+  });
+  return [...new Set(rules.map((r) => r.symbol!))];
+}
+
+/** Symboles ayant une règle d'analyse technique (pour le fetch des bougies). */
+export async function indicatorSymbols(): Promise<string[]> {
+  const rules = await prisma.alertRule.findMany({
+    where: {
+      state: { not: "DISABLED" },
+      symbol: { not: null },
+      type: { in: [...INDICATOR_TYPES] },
+    },
+    select: { symbol: true },
+  });
+  return [...new Set(rules.map((r) => r.symbol!))];
+}
+
+/** Symboles ayant une règle options (pour le refresh de l'analyse de chaîne). */
+export async function optionsAlertSymbols(): Promise<string[]> {
+  const rules = await prisma.alertRule.findMany({
+    where: {
+      state: { not: "DISABLED" },
+      symbol: { not: null },
+      type: { in: [...OPTION_TYPES] },
+    },
     select: { symbol: true },
   });
   return [...new Set(rules.map((r) => r.symbol!))];
@@ -173,6 +275,90 @@ function computeCondition(
             : pnlBase <= rule.threshold,
       };
     }
+    case "RSI_BELOW":
+    case "RSI_ABOVE": {
+      const bars = getBars(rule.symbolKey);
+      if (!bars) return null; // bougies pas encore chargées → dormant
+      const value = rsi(
+        closesWithLive(bars, quote.last),
+        clampInt(rule.params.period, 2, 100, 14)
+      );
+      if (value == null) return null;
+      return {
+        value,
+        condition:
+          rule.type === "RSI_BELOW"
+            ? value <= rule.threshold
+            : value >= rule.threshold,
+      };
+    }
+    case "SMA_CROSS_UP":
+    case "SMA_CROSS_DOWN": {
+      const bars = getBars(rule.symbolKey);
+      if (!bars) return null;
+      const fastP = clampInt(rule.params.fast, 2, 200, 9);
+      const slowP = clampInt(rule.params.slow, 3, 400, 21);
+      // Vrai CROISEMENT (pas un simple niveau) : on compare la relation
+      // fast/slow d'AVANT (bougies clôturées) à celle de MAINTENANT (avec le
+      // cours live). On ne tire que sur la bascule du signe de (fast - slow),
+      // sinon une règle armée alors que fast>slow depuis longtemps tirerait
+      // un faux « croisement » dès le 1er tick.
+      const now = closesWithLive(bars, quote.last);
+      const prev = completedBars(bars).map((b) => b.c);
+      const fNow = sma(now, fastP);
+      const sNow = sma(now, slowP);
+      const fPrev = sma(prev, fastP);
+      const sPrev = sma(prev, slowP);
+      if (fNow == null || sNow == null || fPrev == null || sPrev == null) {
+        return null;
+      }
+      const condition =
+        rule.type === "SMA_CROSS_UP"
+          ? fPrev <= sPrev && fNow > sNow
+          : fPrev >= sPrev && fNow < sNow;
+      return { value: fNow - sNow, condition };
+    }
+    case "BREAKOUT_HIGH":
+    case "BREAKOUT_LOW": {
+      const bars = getBars(rule.symbolKey);
+      if (!bars) return null;
+      const lookback = clampInt(rule.threshold, 2, 400, 20);
+      // Niveau = extrême des séances DÉJÀ clôturées (hors bougie du jour)
+      const completed = completedBars(bars);
+      if (rule.type === "BREAKOUT_HIGH") {
+        const level = highest(completed.map((b) => b.h), lookback);
+        if (level == null) return null;
+        return { value: quote.last, condition: quote.last >= level };
+      }
+      const level = lowest(completed.map((b) => b.l), lookback);
+      if (level == null) return null;
+      return { value: quote.last, condition: quote.last <= level };
+    }
+    case "IV_ABOVE":
+    case "IV_BELOW": {
+      const a = getCachedAnalysis(rule.symbolKey);
+      if (!a || a.atmIv == null) return null; // chaîne pas encore chargée
+      const ivPct = a.atmIv * 100;
+      return {
+        value: ivPct,
+        condition:
+          rule.type === "IV_ABOVE" ? ivPct >= rule.threshold : ivPct <= rule.threshold,
+      };
+    }
+    case "PUT_CALL_ABOVE": {
+      const a = getCachedAnalysis(rule.symbolKey);
+      if (!a || a.putCallRatioOi == null) return null;
+      return {
+        value: a.putCallRatioOi,
+        condition: a.putCallRatioOi >= rule.threshold,
+      };
+    }
+    case "GAMMA_FLIP_NEAR": {
+      const a = getCachedAnalysis(rule.symbolKey);
+      if (!a || a.gammaFlip == null || quote.last <= 0) return null;
+      const distPct = (Math.abs(quote.last - a.gammaFlip) / quote.last) * 100;
+      return { value: distPct, condition: distPct <= rule.threshold };
+    }
   }
 }
 
@@ -189,6 +375,26 @@ function buildMessage(rule: RuleRuntime, value: number): string {
       return `ALERT DESK — P&L latent ${rule.displayLabel} : ${formatSignedMoney(value)} (seuil ${formatSignedMoney(th)})`;
     case "POSITION_PNL_BELOW":
       return `ALERT DESK — P&L latent ${rule.displayLabel} : ${formatSignedMoney(value)} (seuil ${formatSignedMoney(th)})`;
+    case "RSI_BELOW":
+      return `ALERT DESK — ${rule.displayLabel} : RSI ${value.toFixed(0)} sous ${th} (survendu)`;
+    case "RSI_ABOVE":
+      return `ALERT DESK — ${rule.displayLabel} : RSI ${value.toFixed(0)} au-dessus de ${th} (suracheté)`;
+    case "SMA_CROSS_UP":
+      return `ALERT DESK — ${rule.displayLabel} : croisement MM haussier (MM${rule.params.fast ?? 9} > MM${rule.params.slow ?? 21})`;
+    case "SMA_CROSS_DOWN":
+      return `ALERT DESK — ${rule.displayLabel} : croisement MM baissier (MM${rule.params.fast ?? 9} < MM${rule.params.slow ?? 21})`;
+    case "BREAKOUT_HIGH":
+      return `ALERT DESK — ${rule.displayLabel} casse son plus-haut ${th} j (cours ${value.toFixed(2)})`;
+    case "BREAKOUT_LOW":
+      return `ALERT DESK — ${rule.displayLabel} casse son plus-bas ${th} j (cours ${value.toFixed(2)})`;
+    case "IV_ABOVE":
+      return `ALERT DESK — ${rule.displayLabel} IV ATM ${value.toFixed(1)} % ≥ ${th} %`;
+    case "IV_BELOW":
+      return `ALERT DESK — ${rule.displayLabel} IV ATM ${value.toFixed(1)} % ≤ ${th} %`;
+    case "PUT_CALL_ABOVE":
+      return `ALERT DESK — ${rule.displayLabel} put/call ${value.toFixed(2)} ≥ ${th}`;
+    case "GAMMA_FLIP_NEAR":
+      return `ALERT DESK — ${rule.displayLabel} à ${value.toFixed(2)} % du gamma flip (seuil ${th} %)`;
   }
 }
 
